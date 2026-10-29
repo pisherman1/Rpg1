@@ -2,6 +2,12 @@ package com.rpg1.core
 
 import com.rpg1.core.Ability.*
 
+enum class Gender(val label: String, val symbol: String) {
+    MALE("Male", "♂"), FEMALE("Female", "♀");
+
+    val other get() = if (this == MALE) FEMALE else MALE
+}
+
 /** Playable races. Speed is in 5-foot squares (6 squares = 30 ft). */
 enum class Race(
     val displayName: String,

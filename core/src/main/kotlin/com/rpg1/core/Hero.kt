@@ -8,6 +8,7 @@ class Hero(
     val charClass: CharClass,
     /** Scores with racial bonuses and ability score improvements, before magic items. */
     baseAbilities: AbilityScores,
+    val gender: Gender = Gender.MALE,
 ) : Creature(name) {
     var baseAbilities: AbilityScores = baseAbilities
         private set
@@ -393,7 +394,7 @@ class Hero(
     // --- Saving --------------------------------------------------------------
 
     fun toSave(): Map<String, Any?> = linkedMapOf(
-        "name" to name, "race" to race.name, "class" to charClass.name,
+        "name" to name, "race" to race.name, "class" to charClass.name, "gender" to gender.name,
         "abilities" to Ability.entries.map { baseAbilities[it] },
         "level" to level, "xp" to xp, "hp" to hp,
         "hitDice" to hitDice, "slots" to spellSlots, "maxSlots" to maxSpellSlots,
@@ -419,17 +420,17 @@ class Hero(
         const val SUBCLASS_LEVEL = 3
 
         /** Rolled scores are assigned to abilities by class priority, then racial bonuses applied. */
-        fun create(name: String, race: Race, charClass: CharClass, rolled: List<Int>): Hero =
-            Hero(name, race, charClass, AbilityScores.assign(rolled, charClass.abilityPriority).withBonuses(race.bonuses))
+        fun create(name: String, race: Race, charClass: CharClass, rolled: List<Int>, gender: Gender = Gender.MALE): Hero =
+            Hero(name, race, charClass, AbilityScores.assign(rolled, charClass.abilityPriority).withBonuses(race.bonuses), gender)
 
         /** [baseScores] in STR, DEX, CON, INT, WIS, CHA order, before racial bonuses. */
-        fun withScores(name: String, race: Race, charClass: CharClass, baseScores: List<Int>): Hero =
-            Hero(name, race, charClass, AbilityScores.of(*baseScores.toIntArray()).withBonuses(race.bonuses))
+        fun withScores(name: String, race: Race, charClass: CharClass, baseScores: List<Int>, gender: Gender = Gender.MALE): Hero =
+            Hero(name, race, charClass, AbilityScores.of(*baseScores.toIntArray()).withBonuses(race.bonuses), gender)
 
         /** Rebuilds a hero from [toSave] output; version 1 saves had +N bonuses instead of items. */
         fun fromSave(h: JsonObj, version: Int): Hero {
             val hero = Hero(h.str("name"), Race.valueOf(h.str("race")), CharClass.valueOf(h.str("class")),
-                AbilityScores.of(*h.ints("abilities")))
+                AbilityScores.of(*h.ints("abilities")), h.strOrNull("gender")?.let { Gender.valueOf(it) } ?: Gender.MALE)
             hero.level = h.int("level")
             hero.xp = h.int("xp")
             hero.spellSlots = h.ints("slots")

@@ -1,30 +1,45 @@
 package com.rpg1.render
 
 import com.rpg1.core.CharClass
+import com.rpg1.core.Gender
 import com.rpg1.core.MonsterType
 import com.rpg1.core.Race
 import com.rpg1.core.art.Palette
 import com.rpg1.core.art.Sprites
 
-/** Pixel data for the hero sprite of a race/class pair (dwarves get beards, elves pointed ears). */
+/**
+ * Pixel data for a hero: the class sprite, its male or female overlay, then race details
+ * (dwarven beards or braids, elven ears).
+ */
 object HeroArt {
-    fun pixels(race: Race, cls: CharClass): IntArray {
+    fun pixels(race: Race, cls: CharClass, gender: Gender = Gender.MALE): IntArray {
         val px = when (cls) {
             CharClass.FIGHTER -> Sprites.FIGHTER
             CharClass.ROGUE -> Sprites.ROGUE
             CharClass.WIZARD -> Sprites.WIZARD
             CharClass.CLERIC -> Sprites.CLERIC
         }.pixels()
+        val overlay = Sprites.genderOverlay(cls.name, gender == Gender.FEMALE)
+        overlay.rows.forEachIndexed { y, row ->
+            row.forEachIndexed { x, ch -> if (ch != '.') px[y * 16 + x] = Palette.colors.getValue(ch) }
+        }
         val skin = Palette.colors.getValue('s')
         val outline = Palette.colors.getValue('k')
         fun set(x: Int, y: Int, c: Int) { px[y * 16 + x] = c }
         when (race) {
             Race.DWARF -> {
                 val beard = 0xFFB0602A.toInt()
-                set(5, 6, beard); set(10, 6, beard)
-                for (x in 5..10) set(x, 7, beard)
-                for (x in 6..9) set(x, 8, beard)
-                set(7, 9, beard); set(8, 9, beard)
+                if (gender == Gender.MALE) {
+                    set(5, 6, beard); set(10, 6, beard)
+                    for (x in 5..10) set(x, 7, beard)
+                    for (x in 6..9) set(x, 8, beard)
+                    set(7, 9, beard); set(8, 9, beard)
+                } else {
+                    // Thick braids hanging past the shoulders.
+                    for (y in 6..10) { set(4, y, beard); set(11, y, beard) }
+                    set(3, 7, outline); set(12, 7, outline); set(3, 9, outline); set(12, 9, outline)
+                    set(4, 11, 0xFFF2C641.toInt()); set(11, 11, 0xFFF2C641.toInt())
+                }
             }
             Race.ELF -> {
                 set(3, 4, outline); set(12, 4, outline)
@@ -74,7 +89,7 @@ class Atlas private constructor(
     companion object {
         private const val CELL = 18
 
-        fun heroKey(race: Race, cls: CharClass) = "hero_${cls.name}_${race.name}"
+        fun heroKey(race: Race, cls: CharClass, gender: Gender = Gender.MALE) = "hero_${cls.name}_${race.name}_${gender.name}"
         fun monsterKey(type: MonsterType) = type.name.lowercase()
 
         /** Sprites made in code rather than drawn by hand. */
@@ -112,7 +127,9 @@ class Atlas private constructor(
         fun build(): Atlas {
             val entries = mutableListOf<Pair<String, IntArray>>()
             for (sprite in Sprites.all) entries += sprite.name to sprite.pixels()
-            for (race in Race.entries) for (cls in CharClass.entries) entries += heroKey(race, cls) to HeroArt.pixels(race, cls)
+            for (race in Race.entries) for (cls in CharClass.entries) for (g in Gender.entries) {
+                entries += heroKey(race, cls, g) to HeroArt.pixels(race, cls, g)
+            }
             entries += generated()
 
             val cols = 16

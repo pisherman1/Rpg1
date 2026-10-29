@@ -19,7 +19,7 @@ class RenderTest {
     @Test
     fun atlasHoldsEverySpriteWithExtrudedBorders() {
         for (s in Sprites.all) atlas.id(s.name)
-        for (r in Race.entries) for (c in CharClass.entries) atlas.id(Atlas.heroKey(r, c))
+        for (r in Race.entries) for (c in CharClass.entries) for (g in com.rpg1.core.Gender.entries) atlas.id(Atlas.heroKey(r, c, g))
         for (m in MonsterType.entries) atlas.id(Atlas.monsterKey(m))
         assertEquals(Integer.bitCount(atlas.height), 1, "atlas height should be a power of two")
         // Each region spans exactly one 16px cell and its border repeats the edge pixel.

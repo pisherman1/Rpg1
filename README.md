@@ -20,7 +20,7 @@ To build locally you need the Android SDK (API 35) and JDK 17:
 ## Playing
 
 1. **Assemble your party.** Each of the four slots can be built from scratch (tap the name
-   to rename, use the arrows to pick race and class, *Reroll* for new 4d6-drop-lowest scores)
+   to rename, ♂/♀ to pick male or female, use the arrows to pick race and class, *Reroll* for new 4d6-drop-lowest scores)
    or loaded from a premade (*Premade* per slot, or *Premade party* for all four).
 2. **Explore.** Tap a square to walk there; the rest of the party follows the leader (★).
    Tap a portrait to change the leader. Walking onto chests, potions and gold picks them up.
@@ -99,7 +99,8 @@ Edit `core/src/main/kotlin/com/rpg1/core/Party.kt`, `object Premades`:
 HeroTemplate("Name", Race.ELF, CharClass.ROGUE, listOf(10, 15, 14, 12, 13, 8)),
 ```
 
-Scores are STR, DEX, CON, INT, WIS, CHA *before* racial bonuses; pass `null` (or leave the
+Add `gender = Gender.FEMALE` (or `MALE`) to choose the hero's look. Scores are STR, DEX, CON,
+INT, WIS, CHA *before* racial bonuses; pass `null` (or leave the
 list out) to roll them when the premade is picked. A `PartyTemplate` takes exactly four heroes.
 
 ## Graphics

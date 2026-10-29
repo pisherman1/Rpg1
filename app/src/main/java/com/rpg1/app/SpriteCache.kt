@@ -2,6 +2,7 @@ package com.rpg1.app
 
 import android.graphics.Bitmap
 import com.rpg1.core.CharClass
+import com.rpg1.core.Gender
 import com.rpg1.core.MonsterType
 import com.rpg1.core.Race
 import com.rpg1.core.art.Sprite
@@ -17,7 +18,8 @@ object SpriteCache {
 
     fun get(sprite: Sprite) = bitmap(sprite.name) { sprite.pixels() }
 
-    fun hero(race: Race, cls: CharClass): Bitmap = bitmap("hero_${cls.name}_${race.name}") { HeroArt.pixels(race, cls) }
+    fun hero(race: Race, cls: CharClass, gender: Gender = Gender.MALE): Bitmap =
+        bitmap("hero_${cls.name}_${race.name}_${gender.name}") { HeroArt.pixels(race, cls, gender) }
 
     fun heroScale(race: Race) = HeroArt.scale(race)
 

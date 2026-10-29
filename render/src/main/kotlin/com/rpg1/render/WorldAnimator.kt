@@ -464,7 +464,7 @@ class WorldAnimator(private val atlas: Atlas) {
                     val bob = if (a?.moving == true || c.isUnconscious) 0f else if (sin(time * 3.4f + idx * 1.6f) > 0.3f) -1f else 0f
                     val s = HeroArt.scale(c.race)
                     val w = floor(16f * s)
-                    sprite(sprites, atlas.id(Atlas.heroKey(c.race, c.charClass)),
+                    sprite(sprites, atlas.id(Atlas.heroKey(c.race, c.charClass, c.gender)),
                         x + lx + (16f - w) / 2, y + ly + 16f - w + bob, w, w, flash = flash, rotate = c.isUnconscious,
                         r = if (c.isUnconscious) 0.75f else 1f, g = if (c.isUnconscious) 0.7f else 1f, b = if (c.isUnconscious) 0.7f else 1f)
                     if (!c.isUnconscious) {

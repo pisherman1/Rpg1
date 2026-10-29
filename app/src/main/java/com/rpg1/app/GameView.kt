@@ -356,7 +356,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     }
 
     private fun heroSprite(c: Canvas, h: Hero, left: Float, top: Float, size: Float) =
-        sprite(c, SpriteCache.hero(h.race, h.charClass), left, top, size, SpriteCache.heroScale(h.race))
+        sprite(c, SpriteCache.hero(h.race, h.charClass, h.gender), left, top, size, SpriteCache.heroScale(h.race))
 
     // =======================================================================
     // Party builder
@@ -388,10 +388,14 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             y += spriteSize + line * 0.9f
 
             // Name (tap to edit)
-            val nameRect = RectF(left + pad, y - line * 0.8f, card.right - pad, y + line * 0.35f)
+            val genderW = line * 1.3f
+            val nameRect = RectF(left + pad, y - line * 0.8f, card.right - pad * 1.5f - genderW, y + line * 0.35f)
             box(c, nameRect, cPanelLight)
-            drawFitText(c, draft.name, cx, y, line * 0.75f, nameRect.width() * 0.9f, cGold, Paint.Align.CENTER)
+            drawFitText(c, draft.name, nameRect.centerX(), y, line * 0.75f, nameRect.width() * 0.9f, cGold, Paint.Align.CENTER)
             hit(nameRect) { host.askName(draft.name) { draft.name = it } }
+            button(c, RectF(card.right - pad - genderW, nameRect.top, card.right - pad, nameRect.bottom), draft.gender.symbol) {
+                builder.toggleGender(i)
+            }
             y += line * 0.75f
             drawText(c, "tap name to rename", cx, y, line * 0.38f, cDim, Paint.Align.CENTER)
             y += line * 1.0f
@@ -777,7 +781,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             g.turnOrder.forEachIndexed { i, cr ->
                 val ix = left + pad + i * iconSize
                 val bmp = when (cr) {
-                    is Hero -> SpriteCache.hero(cr.race, cr.charClass)
+                    is Hero -> SpriteCache.hero(cr.race, cr.charClass, cr.gender)
                     is Monster -> SpriteCache.monster(cr.type)
                     else -> null
                 } ?: return@forEachIndexed
