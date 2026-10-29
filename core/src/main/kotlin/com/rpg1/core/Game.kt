@@ -4,7 +4,7 @@ enum class LogKind { INFO, ROLL, GOOD, BAD, LOOT, LEVEL }
 
 data class LogEntry(val text: String, val kind: LogKind)
 
-enum class FxKind { DAMAGE, HEAL, MISS, CRIT, FIRE, RADIANT, FORCE, ARROW, INFO }
+enum class FxKind { DAMAGE, HEAL, MISS, CRIT, FIRE, RADIANT, FORCE, ARROW, INFO, LOOT }
 
 /** Visual effects for the UI to animate; the game only records them. */
 sealed class Fx {
@@ -75,6 +75,9 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     private var disengaged = false
     private var movedThisTurn = false
     private var autoEndTurn = false
+    /** Extra Attack: weapon attacks left from the current Attack action. */
+    var attacksLeft = 0
+        private set
     /** The creature whose turn it was left the order; turnIndex already points at the next one. */
     private var turnHolderRemoved = false
 
@@ -275,20 +278,41 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     val prompt: String
         get() {
             val h = activeHero
+            val spell = armedSpell
             return when {
                 phase == Phase.GAME_OVER -> "The party has fallen. Tap New Party to try again."
-                armedSpell?.target == SpellTarget.ALLY -> "Tap a hero (or portrait) to heal"
-                armedSpell != null -> "Tap a target for ${armedSpell!!.displayName}"
+                spell?.target == SpellTarget.ALLY -> "Tap a hero (or portrait) for ${spell.displayName}"
+                spell?.target == SpellTarget.DEAD_ALLY -> "Tap a fallen hero's portrait to revive them"
+                spell != null -> "Tap a target for ${spell.displayName}"
                 armedPotion -> "Tap a hero (or portrait) to give the potion"
                 armedRanged -> "Tap a target for the ${h?.charClass?.rangedWeapon?.name}"
                 phase == Phase.MONSTER_TURN -> "${current?.name}'s turn..."
                 h != null && phase == Phase.PLAYER_TURN && h.isUnconscious -> "${h.name} is dying! Death saves: " +
                     "${h.deathSuccesses} successes, ${h.deathFailures} failures"
+                h != null && phase == Phase.PLAYER_TURN && attacksLeft > 0 -> "${h.name}: Extra Attack! Tap a foe"
                 h != null && phase == Phase.PLAYER_TURN -> "${h.name}'s turn: tap to move or attack"
                 onStairs(leader) -> "Stairs! Tap Descend to go deeper"
                 else -> "Tap to explore. Tap a portrait to change leader"
             }
         }
+
+    /** True while the active hero can still make a weapon attack this turn. */
+    val canAttack get() = phase == Phase.PLAYER_TURN && (actionAvailable || attacksLeft > 0)
+
+    /** Whether [spell] could be cast by [h] right now (ignoring targets). */
+    fun canCastNow(h: Hero, spell: Spell): Boolean {
+        if (!h.canCast(spell) || h.isUnconscious) return false
+        return when (phase) {
+            Phase.EXPLORING -> spell.outOfCombatOnly || spell.isHealing && spell.target != SpellTarget.ENEMY ||
+                (spell.target == SpellTarget.DEAD_ALLY)
+            Phase.PLAYER_TURN -> !spell.outOfCombatOnly && if (spell.bonusAction) bonusActionAvailable else actionAvailable
+            else -> false
+        } && when (spell.target) {
+            SpellTarget.DEAD_ALLY -> party.any { it.dead } && partyGold >= REVIVIFY_COST
+            SpellTarget.ALLY, SpellTarget.PARTY -> !spell.isHealing || livingHeroes.any { it.hp < it.maxHp }
+            else -> true
+        }
+    }
 
     fun availableActions(): List<GameAction> {
         val h = activeHero ?: return emptyList()
@@ -300,8 +324,8 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 if (onStairs(h)) actions += GameAction(ActionId.DESCEND, "Descend")
                 val wounded = livingHeroes.any { it.hp < it.maxHp }
                 actions += GameAction(ActionId.POTION, "Potion x${totalPotions()}", totalPotions() > 0 && wounded, armedPotion)
-                for (spell in cls.spells.filter { it.target == SpellTarget.ALLY }) {
-                    actions += GameAction(ActionId.SPELL, spellLabel(h, spell), h.canCast && wounded, armedSpell == spell, spell)
+                for (spell in h.knownSpells.filter { it.outOfCombatOnly || (it.isHealing && it.target != SpellTarget.ENEMY) }) {
+                    actions += GameAction(ActionId.SPELL, spellLabel(h, spell), canCastNow(h, spell), armedSpell == spell, spell)
                 }
                 val needsRest = livingHeroes.any { it.hp < it.maxHp || !it.secondWindAvailable || !it.actionSurgeAvailable }
                 actions += GameAction(ActionId.SHORT_REST, "Short Rest", needsRest)
@@ -311,12 +335,11 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 val mine = !h.isUnconscious
                 val bonusCunning = cls == CharClass.ROGUE && h.level >= 2 && bonusActionAvailable
                 actions += GameAction(ActionId.END_TURN, "End Turn", !autoEndTurn)
-                for (spell in cls.spells) {
-                    val ok = mine && actionAvailable && (spell.isCantrip || h.canCast)
-                    actions += GameAction(ActionId.SPELL, spellLabel(h, spell), ok, armedSpell == spell, spell)
+                for (spell in h.knownSpells.filter { !it.outOfCombatOnly }) {
+                    actions += GameAction(ActionId.SPELL, spellLabel(h, spell), mine && canCastNow(h, spell), armedSpell == spell, spell)
                 }
                 cls.rangedWeapon?.let {
-                    actions += GameAction(ActionId.RANGED, it.name.substringAfterLast(' '), mine && actionAvailable, armedRanged)
+                    actions += GameAction(ActionId.RANGED, it.name.substringAfterLast(' '), mine && canAttack, armedRanged)
                 }
                 if (cls == CharClass.FIGHTER) {
                     actions += GameAction(ActionId.SECOND_WIND, "2nd Wind", mine && bonusActionAvailable && h.secondWindAvailable)
@@ -337,10 +360,15 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         return actions
     }
 
-    private fun spellLabel(h: Hero, spell: Spell): String =
-        if (spell.isCantrip) spell.shortName else "${spell.shortName} ${h.spellSlots.sum()}"
+    private fun spellLabel(h: Hero, spell: Spell): String = when {
+        spell.isCantrip -> spell.shortName
+        spell.bonusAction -> "${spell.shortName} (B)"
+        else -> spell.shortName
+    }
 
     private fun totalPotions() = livingHeroes.sumOf { it.potions }
+
+    val partyGold get() = party.sumOf { it.gold }
 
     private fun disarm() {
         armedSpell = null
@@ -381,7 +409,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 val wasArmed = armedSpell == spell
                 disarm()
                 when (spell.target) {
-                    SpellTarget.ADJACENT_AREA -> castSpell(h, spell, null, null)
+                    SpellTarget.ADJACENT_AREA, SpellTarget.PARTY -> castSpell(h, spell, null, null)
                     else -> armedSpell = if (wasArmed) null else spell
                 }
             }
@@ -391,15 +419,22 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     /** Player tapped a hero's portrait (or the hero on the map). */
     fun selectHero(index: Int) {
         val target = party.getOrNull(index) ?: return
-        if (target.dead || phase == Phase.GAME_OVER || phase == Phase.MONSTER_TURN || autoEndTurn) return
+        if (phase == Phase.GAME_OVER || phase == Phase.MONSTER_TURN || autoEndTurn) return
         val h = activeHero ?: return
+        val spell = armedSpell
+        if (target.dead) {
+            if (spell?.target == SpellTarget.DEAD_ALLY) {
+                armedSpell = null
+                castSpell(h, spell, null, target)
+            }
+            return
+        }
         when {
             armedPotion -> {
                 armedPotion = false
                 givePotion(h, target)
             }
-            armedSpell?.target == SpellTarget.ALLY -> {
-                val spell = armedSpell!!
+            spell?.target == SpellTarget.ALLY -> {
                 armedSpell = null
                 castSpell(h, spell, null, target)
             }
@@ -428,8 +463,11 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         val target = monsterAt(x, y)?.takeIf { dungeon.isVisible(x, y) }
         armedSpell?.let { spell ->
             disarm()
-            if (target != null && spell.target == SpellTarget.ENEMY) castSpell(h, spell, target, null)
-            else log("Cancelled ${spell.displayName}.", LogKind.INFO)
+            if (target != null && (spell.target == SpellTarget.ENEMY || spell.target == SpellTarget.ENEMY_AREA)) {
+                castSpell(h, spell, target, null)
+            } else {
+                log("Cancelled ${spell.displayName}.", LogKind.INFO)
+            }
             return
         }
         if (armedRanged || armedPotion) {
@@ -444,7 +482,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 meleeAttack(h, target)
                 return
             }
-            if (phase == Phase.PLAYER_TURN && actionAvailable && tryDefaultRangedAction(h, target)) return
+            if (phase == Phase.PLAYER_TURN && canAttack && tryDefaultRangedAction(h, target)) return
             val path = dungeon.findPath(h.x, h.y, x, y, ::isBlockedForHero, stopAdjacent = true) ?: return
             queueWalk(path, target)
             return
@@ -453,6 +491,31 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         if (!dungeon.isExplored(x, y) || !dungeon[x, y].walkable) return
         val path = dungeon.findPath(h.x, h.y, x, y, ::isBlockedForHero) ?: return
         queueWalk(path, null)
+    }
+
+    // =======================================================================
+    // Inventory
+    // =======================================================================
+
+    /** Shared party bag of unequipped magic items. */
+    val bag = mutableListOf<Item>()
+
+    /** Gear can only be changed outside combat. */
+    val canChangeEquipment get() = phase == Phase.EXPLORING
+
+    fun equip(hero: Hero, item: Item): Boolean {
+        if (!canChangeEquipment || hero.dead || item !in bag || !item.usableBy(hero)) return false
+        bag.remove(item)
+        hero.equip(item)?.let { bag += it }
+        log("${hero.name} equips ${item.nameFor(hero)}.", LogKind.LOOT)
+        return true
+    }
+
+    fun unequip(hero: Hero, slot: ItemSlot): Boolean {
+        if (!canChangeEquipment) return false
+        val item = hero.unequip(slot) ?: return false
+        bag += item
+        return true
     }
 
     private fun queueWalk(path: List<Point>, target: Monster?) {
@@ -496,7 +559,8 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 return true
             }
         }
-        val cantrip = cls.spells.firstOrNull { it.isCantrip && it.target == SpellTarget.ENEMY } ?: return false
+        val cantrip = h.knownSpells.firstOrNull { it.isCantrip && it.target == SpellTarget.ENEMY } ?: return false
+        if (!actionAvailable) return false
         if (h.distanceTo(target) <= cantrip.range && hasLos(h, target)) {
             castSpell(h, cantrip, target, null)
             return true
@@ -557,7 +621,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 return
             }
             val threats = combatMonsters().filter {
-                it.isAdjacentTo(h) && chebyshev(it.x, it.y, next.x, next.y) > 1 && it.reactionAvailable && !it.surprised
+                it.isAdjacentTo(h) && chebyshev(it.x, it.y, next.x, next.y) > 1 && it.reactionAvailable && !it.surprised && !it.asleep
             }
             movementLeft--
             movedThisTurn = true
@@ -590,7 +654,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         if (walkPath.isEmpty()) {
             val t = walkTarget
             walkTarget = null
-            if (t != null && phase == Phase.PLAYER_TURN && !t.isDead && h.isAdjacentTo(t) && actionAvailable) {
+            if (t != null && phase == Phase.PLAYER_TURN && !t.isDead && h.isAdjacentTo(t) && canAttack) {
                 meleeAttack(h, t)
             }
             if (phase == Phase.EXPLORING && onStairs(h) && !stairsHintShown) {
@@ -718,6 +782,8 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             aiming = false
             disengaged = false
             movedThisTurn = false
+            attacksLeft = 0
+            c.reactionAvailable = true
             disarm()
             if (c.isUnconscious) {
                 deathSave(c)
@@ -731,6 +797,9 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             monsterDone = false
             if (c.surprised) {
                 log("${c.name} is surprised and loses its turn.", LogKind.INFO)
+                monsterDone = true
+            } else if (c.asleep) {
+                log("${c.name} is fast asleep.", LogKind.INFO)
                 monsterDone = true
             }
         }
@@ -779,6 +848,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         turnHolderRemoved = false
         walkPath.clear()
         disarm()
+        livingHeroes.forEach { it.blessed = false }
         for (h in livingHeroes.filter { it.isUnconscious }) {
             h.heal(1)
             log("The party tends to ${h.name}, who comes to with 1 HP.", LogKind.INFO)
@@ -848,9 +918,21 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         return true
     }
 
+    /** Spends one attack: the first uses the action, Extra Attack gives more for free. */
+    private fun useAttack(h: Hero): Boolean {
+        if (phase != Phase.PLAYER_TURN) return false
+        if (attacksLeft > 0) {
+            attacksLeft--
+            return true
+        }
+        if (!useAction()) return false
+        attacksLeft = h.attacksPerAction - 1
+        return true
+    }
+
     private fun meleeAttack(h: Hero, target: Monster) {
         if (phase != Phase.PLAYER_TURN) return
-        if (!useAction()) return
+        if (!useAttack(h)) return
         weaponAttack(h, target, h.charClass.meleeWeapon)
     }
 
@@ -865,58 +947,68 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             log("No clear shot.", LogKind.INFO)
             return
         }
-        if (!useAction()) return
+        if (!useAttack(h)) return
         weaponAttack(h, target, weapon)
     }
 
     private fun weaponAttack(h: Hero, target: Monster, weapon: Weapon) {
         if (weapon.ranged) pendingFx += Fx.Bolt(h.x, h.y, target.x, target.y, FxKind.ARROW)
         val label = "${h.name}'s " + if (h.weaponBonus > 0) "+${h.weaponBonus} ${weapon.name}" else weapon.name
-        val roll = heroAttackRoll(h, target, h.attackBonus(weapon), weapon.ranged, label) ?: return
-        var damage = dice.roll(weapon.damage, roll.isCritical) + h.damageBonus(weapon)
+        val hit = heroAttackRoll(h, target, h.attackBonus(weapon), weapon.ranged, label) ?: return
+        var damage = dice.roll(weapon.damage, hit.critical) + h.damageBonus(weapon)
         var detail = "${weapon.damage}${fmt(h.damageBonus(weapon))}"
         // Sneak Attack: advantage, or an ally next to the target (and no disadvantage).
         val allyAdjacent = consciousHeroes.any { it !== h && it.isAdjacentTo(target) }
-        if (h.charClass == CharClass.ROGUE && !sneakAttackUsed && roll.mode != RollMode.DISADVANTAGE &&
-            (roll.mode == RollMode.ADVANTAGE || allyAdjacent || target.surprised)
+        if (h.charClass == CharClass.ROGUE && !sneakAttackUsed && hit.roll.mode != RollMode.DISADVANTAGE &&
+            (hit.roll.mode == RollMode.ADVANTAGE || allyAdjacent || target.surprised)
         ) {
             sneakAttackUsed = true
-            damage += dice.roll(DiceExpr(h.sneakAttackDice, 6), roll.isCritical)
+            damage += dice.roll(DiceExpr(h.sneakAttackDice, 6), hit.critical)
             detail += " + Sneak Attack ${h.sneakAttackDice}d6"
         }
-        damageMonster(target, maxOf(1, damage), roll.isCritical, weapon.damageType, detail)
+        damageMonster(target, maxOf(1, damage), hit.critical, weapon.damageType, detail)
     }
 
-    /** Rolls a hero's attack and logs it. Returns the roll on a hit, null on a miss. */
-    private fun heroAttackRoll(h: Hero, target: Monster, bonus: Int, ranged: Boolean, label: String): D20Roll? {
-        val advantage = target.marked || aiming
-        val enemyAdjacent = combatMonsters().any { it.isAdjacentTo(h) }
+    private class Hit(val roll: D20Roll, val critical: Boolean)
+
+    /** Rolls a hero's attack and logs it. Returns the hit (with crit flag), or null on a miss. */
+    private fun heroAttackRoll(h: Hero, target: Monster, bonus: Int, ranged: Boolean, label: String): Hit? {
+        val advantage = target.marked || aiming || target.asleep
+        val enemyAdjacent = combatMonsters().any { it.isAdjacentTo(h) && !it.asleep }
         val disadvantage = target.dodging || (ranged && enemyAdjacent)
         val roll = dice.d20(RollMode.of(advantage, disadvantage), h.lucky)
         target.marked = false
         aiming = false
-        val total = roll.natural + bonus
+        val bless = if (h.blessed) dice.roll(4) else 0
+        val total = roll.natural + bonus + bless
         val hit = roll.isCritical || (!roll.isFumble && total >= target.armorClass)
+        // Melee hits on a sleeping foe within reach are critical, as against any helpless creature.
+        val critical = hit && (roll.isCritical || (target.asleep && !ranged && h.isAdjacentTo(target)))
         val modeNote = when (roll.mode) {
             RollMode.ADVANTAGE -> " (adv)"
             RollMode.DISADVANTAGE -> " (disadv)"
             RollMode.NORMAL -> ""
         }
         val verdict = when {
-            roll.isCritical -> "CRITICAL HIT!"
+            critical -> "CRITICAL HIT!"
             hit -> "hit"
             roll.isFumble -> "natural 1, miss"
             else -> "miss"
         }
-        log("$label vs ${target.name}: ${roll.describe()}${fmt(bonus)} = $total vs AC ${target.armorClass}$modeNote, $verdict",
+        val blessNote = if (h.blessed) " +bless $bless" else ""
+        log("$label vs ${target.name}: ${roll.describe()}${fmt(bonus)}$blessNote = $total vs AC ${target.armorClass}$modeNote, $verdict",
             if (hit) LogKind.ROLL else LogKind.INFO)
         if (!hit) pendingFx += Fx.Text(target.x, target.y, "miss", FxKind.MISS)
-        return if (hit) roll else null
+        return if (hit) Hit(roll, critical) else null
     }
 
     private fun damageMonster(target: Monster, amount: Int, critical: Boolean, type: String, detail: String) {
         if (target.isDead) return
         target.hp -= amount
+        if (target.asleep && target.hp > 0) {
+            target.asleep = false
+            log("${target.name} wakes up!", LogKind.INFO)
+        }
         pendingFx += Fx.Text(target.x, target.y, "-$amount", if (critical) FxKind.CRIT else FxKind.DAMAGE)
         log("${target.name} takes $amount $type damage ($detail).", LogKind.GOOD)
         if (target.hp <= 0 && target.type == MonsterType.ZOMBIE && type != "radiant" && !critical) {
@@ -952,10 +1044,13 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 pendingFx += Fx.Text(h.x, h.y, "LEVEL UP", FxKind.HEAL)
             }
         }
-        if (dungeon.itemAt(m.x, m.y) == null && dungeon[m.x, m.y] == Tile.FLOOR) {
-            when (dice.roll(12)) {
-                1, 2 -> dungeon.items += FloorItem(m.x, m.y, ItemKind.POTION)
-                3, 4, 5 -> dungeon.items += FloorItem(m.x, m.y, ItemKind.GOLD)
+        if (dungeon.itemAt(m.x, m.y) == null && dungeon[m.x, m.y].walkable) {
+            val boss = m.type == MonsterType.OGRE
+            when {
+                boss || dice.roll(100) <= 3 + m.type.cr.toInt() * 3 ->
+                    dungeon.items += FloorItem(m.x, m.y, ItemKind.TREASURE, Loot.randomItem(dice, depth, boss))
+                dice.roll(12) <= 2 -> dungeon.items += FloorItem(m.x, m.y, ItemKind.POTION)
+                dice.roll(12) <= 3 -> dungeon.items += FloorItem(m.x, m.y, ItemKind.GOLD)
             }
         }
         if (phase == Phase.PLAYER_TURN) endCombatIfOver()
@@ -975,7 +1070,12 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             pendingFx += Fx.Text(target.x, target.y, "miss", FxKind.MISS)
             return
         }
-        val damage = maxOf(1, dice.roll(attack.damage, critical))
+        var damage = maxOf(1, dice.roll(attack.damage, critical))
+        if (target.hasUncannyDodge && target.reactionAvailable && !target.isUnconscious) {
+            target.reactionAvailable = false
+            damage = maxOf(1, damage / 2)
+            log("${target.name} uses Uncanny Dodge to halve the damage!", LogKind.GOOD)
+        }
         damageHero(target, damage, critical, "${attack.damageType} from ${m.name}")
     }
 
@@ -1006,6 +1106,10 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     }
 
     private fun deathSave(h: Hero) {
+        if (!h.stable && h.hasWoundClosure) {
+            h.stable = true
+            log("${h.name}'s Periapt of Wound Closure stabilises them.", LogKind.GOOD)
+        }
         if (h.stable) {
             log("${h.name} is stable but unconscious.", LogKind.INFO)
             return
@@ -1066,14 +1170,19 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     // =======================================================================
 
     fun castSpell(h: Hero, spell: Spell, target: Monster?, ally: Hero?) {
-        if (spell !in h.charClass.spells || h.isUnconscious || phase == Phase.MONSTER_TURN || phase == Phase.GAME_OVER) return
-        val slot = if (spell.isCantrip) 0 else h.lowestAvailableSlot()
+        if (spell !in h.knownSpells || h.isUnconscious || h.dead || phase == Phase.MONSTER_TURN || phase == Phase.GAME_OVER) return
+        if (phase == Phase.PLAYER_TURN && current !== h) return
+        if (spell.outOfCombatOnly && inCombat) {
+            log("${spell.displayName} takes too long to cast in combat.", LogKind.INFO)
+            return
+        }
+        val slot = if (spell.isCantrip) 0 else h.lowestAvailableSlot(spell.level)
         if (slot == null) {
-            log("${h.name} has no spell slots left. Rest to recover them.", LogKind.INFO)
+            log("${h.name} has no spell slots left for ${spell.displayName}. Rest to recover them.", LogKind.INFO)
             return
         }
         when (spell.target) {
-            SpellTarget.ENEMY -> {
+            SpellTarget.ENEMY, SpellTarget.ENEMY_AREA -> {
                 if (target == null || target.isDead || phase != Phase.PLAYER_TURN) return
                 if (h.distanceTo(target) > spell.range) {
                     log("${target.name} is out of range for ${spell.displayName} (${spell.range}).", LogKind.INFO)
@@ -1087,7 +1196,8 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             SpellTarget.ALLY -> {
                 if (ally == null || ally.dead) return
                 if (inCombat && h.distanceTo(ally) > spell.range) {
-                    log("${spell.displayName} needs a touch: move next to ${ally.name}.", LogKind.INFO)
+                    log(if (spell.range <= 1) "${spell.displayName} needs a touch: move next to ${ally.name}."
+                        else "${ally.name} is out of range for ${spell.displayName}.", LogKind.INFO)
                     return
                 }
             }
@@ -1095,57 +1205,145 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 log("No enemies within reach of ${spell.displayName}.", LogKind.INFO)
                 return
             }
+            SpellTarget.PARTY -> if (phase != Phase.PLAYER_TURN && !spell.outOfCombatOnly && !spell.isHealing) return
+            SpellTarget.DEAD_ALLY -> {
+                if (ally == null || !ally.dead) return
+                if (partyGold < REVIVIFY_COST) {
+                    log("Revivify needs a ${REVIVIFY_COST} gp diamond; the party has $partyGold gold.", LogKind.INFO)
+                    return
+                }
+            }
         }
-        if (!useAction()) return
+        if (spell.bonusAction && phase == Phase.PLAYER_TURN) {
+            if (!bonusActionAvailable) {
+                log("${h.name} has already used their bonus action.", LogKind.INFO)
+                return
+            }
+            bonusActionAvailable = false
+        } else if (!useAction()) {
+            return
+        }
         if (slot > 0) h.spendSlot(slot)
+        val upcast = maxOf(0, slot - spell.level)
+        fun scaled(base: DiceExpr = spell.dice) =
+            base.withCount((if (spell.isCantrip) base.count * h.cantripDice else base.count) + upcast * spell.upcastDice)
         val slotNote = if (slot > 0) " (level $slot slot)" else ""
         log("${h.name} casts ${spell.displayName}$slotNote.", LogKind.INFO)
 
         when (spell) {
-            Spell.FIRE_BOLT -> spellAttack(h, target!!, spell, spell.dice.withCount(h.cantripDice), FxKind.FIRE)
+            Spell.FIRE_BOLT -> spellAttack(h, target!!, spell, scaled(), FxKind.FIRE)
+            Spell.RAY_OF_FROST -> spellAttack(h, target!!, spell, scaled(), FxKind.FORCE)
+            Spell.SCORCHING_RAY -> {
+                val rays = 3 + upcast
+                for (i in 0 until rays) {
+                    if (target!!.isDead) break
+                    spellAttack(h, target, spell, spell.dice, FxKind.FIRE)
+                }
+            }
             Spell.GUIDING_BOLT -> {
-                val hit = spellAttack(h, target!!, spell, spell.dice.withCount(4 + slot - 1), FxKind.RADIANT)
+                val hit = spellAttack(h, target!!, spell, scaled(), FxKind.RADIANT)
                 if (hit && !target.isDead) {
                     target.marked = true
                     log("${target.name} glows with mystical light.", LogKind.INFO)
                 }
             }
             Spell.MAGIC_MISSILE -> {
-                val darts = 2 + slot
+                val darts = 3 + upcast
                 repeat(darts) { pendingFx += Fx.Bolt(h.x, h.y, target!!.x, target.y, FxKind.FORCE) }
                 val total = (1..darts).sumOf { dice.roll(spell.dice) }
                 damageMonster(target!!, total, false, spell.damageType, "$darts darts x ${spell.dice}")
             }
-            Spell.SACRED_FLAME -> {
-                pendingFx += Fx.Bolt(target!!.x, target.y - 2, target.x, target.y, FxKind.RADIANT)
-                if (!monsterSave(h, target, Ability.DEX)) {
-                    val dmgDice = spell.dice.withCount(h.cantripDice)
+            Spell.SACRED_FLAME, Spell.TOLL_THE_DEAD -> {
+                pendingFx += if (spell == Spell.SACRED_FLAME) Fx.Bolt(target!!.x, target.y - 2, target.x, target.y, FxKind.RADIANT)
+                else Fx.Bolt(target!!.x, target.y, target.x, target.y, FxKind.FORCE)
+                if (!monsterSave(h, target, spell.saveAbility!!)) {
+                    val base = if (spell == Spell.TOLL_THE_DEAD && target.hp < target.maxHp) d("1d12") else spell.dice
+                    val dmgDice = scaled(base)
                     damageMonster(target, dice.roll(dmgDice), false, spell.damageType, "$dmgDice")
                 }
             }
-            Spell.BURNING_HANDS -> {
-                val dmgDice = spell.dice.withCount(3 + slot - 1)
-                val damage = dice.roll(dmgDice)
-                for (m in combatMonsters().filter { it.isAdjacentTo(h) }) {
-                    pendingFx += Fx.Bolt(h.x, h.y, m.x, m.y, FxKind.FIRE)
-                    val saved = monsterSave(h, m, Ability.DEX)
-                    damageMonster(m, if (saved) damage / 2 else damage, false, spell.damageType,
-                        if (saved) "$dmgDice, halved" else "$dmgDice")
+            Spell.BURNING_HANDS -> areaDamage(h, spell, combatMonsters().filter { it.isAdjacentTo(h) }, scaled(), FxKind.FIRE, h.x, h.y)
+            Spell.SHATTER, Spell.FIREBALL -> {
+                val center = target!!
+                val victims = combatMonsters().filter { chebyshev(it.x, it.y, center.x, center.y) <= spell.radius }
+                pendingFx += Fx.Bolt(h.x, h.y, center.x, center.y, if (spell == Spell.FIREBALL) FxKind.FIRE else FxKind.FORCE)
+                areaDamage(h, spell, victims, scaled(), if (spell == Spell.FIREBALL) FxKind.FIRE else FxKind.FORCE, center.x, center.y)
+            }
+            Spell.SLEEP -> {
+                val center = target!!
+                var pool = dice.roll(scaled())
+                pendingFx += Fx.Bolt(h.x, h.y, center.x, center.y, FxKind.FORCE)
+                log("Sleep rolls $pool hit points' worth of slumber.", LogKind.ROLL)
+                val candidates = combatMonsters()
+                    .filter { !it.asleep && chebyshev(it.x, it.y, center.x, center.y) <= spell.radius }
+                    .sortedBy { it.hp }
+                for (m in candidates) {
+                    if (m.hp > pool) break
+                    pool -= m.hp
+                    m.asleep = true
+                    pendingFx += Fx.Text(m.x, m.y, "Zzz", FxKind.INFO)
+                    log("${m.name} falls asleep.", LogKind.GOOD)
                 }
+                if (candidates.none { it.asleep }) log("No one succumbs.", LogKind.INFO)
             }
-            Spell.CURE_WOUNDS -> {
-                val healed = ally!!.heal(dice.roll(spell.dice.withCount(slot)) + h.spellMod)
-                pendingFx += Fx.Text(ally.x, ally.y, "+$healed", FxKind.HEAL)
-                log("${ally.name} recovers $healed HP.", LogKind.GOOD)
-                updateFov()
+            Spell.CURE_WOUNDS, Spell.HEALING_WORD -> healHero(h, ally!!, scaled())
+            Spell.MASS_HEALING_WORD -> partyInRange(h, spell).forEach { healHero(h, it, scaled()) }
+            Spell.PRAYER_OF_HEALING -> livingHeroes.forEach { healHero(h, it, scaled()) }
+            Spell.BLESS -> {
+                val blessed = partyInRange(h, spell).filter { !it.isUnconscious }
+                blessed.forEach {
+                    it.blessed = true
+                    pendingFx += Fx.Text(it.x, it.y, "blessed", FxKind.RADIANT)
+                }
+                log("${blessed.joinToString(", ") { it.name }} ${if (blessed.size == 1) "is" else "are"} blessed.", LogKind.GOOD)
             }
+            Spell.REVIVIFY -> revivify(h, ally!!)
         }
+    }
+
+    /** Living heroes within the spell's range of the caster (everyone outside combat). */
+    private fun partyInRange(h: Hero, spell: Spell) =
+        livingHeroes.filter { !inCombat || it.distanceTo(h) <= spell.range }
+
+    private fun healHero(caster: Hero, target: Hero, healDice: DiceExpr) {
+        val healed = target.heal(dice.roll(healDice) + caster.spellMod)
+        pendingFx += Fx.Text(target.x, target.y, "+$healed", FxKind.HEAL)
+        log("${target.name} recovers $healed HP.", LogKind.GOOD)
+        updateFov()
+    }
+
+    private fun areaDamage(h: Hero, spell: Spell, victims: List<Monster>, dmgDice: DiceExpr, fx: FxKind, cx: Int, cy: Int) {
+        val damage = dice.roll(dmgDice)
+        if (victims.isEmpty()) log("The spell catches no one.", LogKind.INFO)
+        for (m in victims) {
+            if (spell == Spell.BURNING_HANDS) pendingFx += Fx.Bolt(cx, cy, m.x, m.y, fx)
+            val saved = monsterSave(h, m, spell.saveAbility!!)
+            damageMonster(m, if (saved) damage / 2 else damage, false, spell.damageType,
+                if (saved) "$dmgDice, halved" else "$dmgDice")
+        }
+    }
+
+    private fun revivify(caster: Hero, target: Hero) {
+        var cost = REVIVIFY_COST
+        for (h in party.sortedByDescending { it.gold }) {
+            val pay = minOf(cost, h.gold)
+            h.gold -= pay
+            cost -= pay
+        }
+        graves.remove(Point(target.x, target.y))
+        target.revive()
+        val spot = squaresNear(Point(caster.x, caster.y), 1).firstOrNull() ?: Point(caster.x, caster.y)
+        target.moveTo(spot.x, spot.y)
+        resetTrail()
+        updateFov()
+        pendingFx += Fx.Text(target.x, target.y, "revived", FxKind.HEAL)
+        log("${caster.name} lays a diamond on ${target.name}'s brow... ${target.name} breathes again!", LogKind.LEVEL)
     }
 
     private fun spellAttack(h: Hero, target: Monster, spell: Spell, dmgDice: DiceExpr, fx: FxKind): Boolean {
         pendingFx += Fx.Bolt(h.x, h.y, target.x, target.y, fx)
-        val roll = heroAttackRoll(h, target, h.spellAttackBonus, true, "${h.name}'s ${spell.displayName}") ?: return false
-        damageMonster(target, dice.roll(dmgDice, roll.isCritical), roll.isCritical, spell.damageType, "$dmgDice")
+        val hit = heroAttackRoll(h, target, h.spellAttackBonus, true, "${h.name}'s ${spell.displayName}") ?: return false
+        damageMonster(target, dice.roll(dmgDice, hit.critical), hit.critical, spell.damageType, "$dmgDice")
         return true
     }
 
@@ -1219,6 +1417,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         if (actionAvailable || !h.actionSurgeAvailable) return
         h.actionSurgeAvailable = false
         actionAvailable = true
+        attacksLeft = 0
         log("${h.name} uses Action Surge!", LogKind.GOOD)
     }
 
@@ -1281,33 +1480,35 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 pendingFx += Fx.Text(h.x, h.y, "+${gold}g", FxKind.INFO)
             }
             ItemKind.CHEST -> openChest(h)
+            ItemKind.TREASURE -> item.item?.let { takeTreasure(h, it) }
         }
+    }
+
+    private fun takeTreasure(h: Hero, item: Item) {
+        bag += item
+        log("${h.name} finds ${item.name} (${item.rarity.label.lowercase()})! It goes in the party bag.", LogKind.LOOT)
+        pendingFx += Fx.Text(h.x, h.y, item.name, FxKind.LOOT)
     }
 
     private fun openChest(h: Hero) {
         val gold = dice.roll(depth * 4, 10)
         h.gold += gold
         val found = mutableListOf("$gold gold")
+        var treasure: Item? = null
         when (dice.roll(20)) {
-            in 1..8 -> {
+            in 1..6 -> {
                 h.potions++
                 found += "a potion of healing"
             }
-            in 9..11 -> livingHeroes.filter { it.weaponBonus < 3 }.minByOrNull { it.weaponBonus }?.let {
-                it.weaponBonus++
-                found += "a +${it.weaponBonus} ${it.charClass.meleeWeapon.name.lowercase()} for ${it.name}"
-            }
-            in 12..13 -> livingHeroes.filter { it.armorBonus < 2 }.minByOrNull { it.armorBonus }?.let {
-                it.armorBonus++
-                found += "+${it.armorBonus} armor for ${it.name}"
-            }
-            in 14..15 -> {
+            in 7..8 -> {
                 h.potions += 2
                 found += "two potions of healing"
             }
+            in 9..15 -> treasure = Loot.randomItem(dice, depth)
         }
         log("${h.name} opens a chest: ${found.joinToString(", ")}.", LogKind.LOOT)
         pendingFx += Fx.Text(h.x, h.y, "+${gold}g", FxKind.INFO)
+        treasure?.let { takeTreasure(h, it) }
     }
 
     // =======================================================================
@@ -1337,24 +1538,12 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             "corpses" to corpses.map(::pt),
             "graves" to graves.map(::pt),
             "log" to log.toList().takeLast(60).map { listOf(it.kind.name, it.text) },
-            "heroes" to party.map { h ->
-                linkedMapOf(
-                    "name" to h.name, "race" to h.race.name, "class" to h.charClass.name,
-                    "abilities" to Ability.entries.map { h.abilities[it] },
-                    "level" to h.level, "xp" to h.xp, "maxHp" to h.maxHp, "hp" to h.hp,
-                    "hitDice" to h.hitDice, "slots" to h.spellSlots, "maxSlots" to h.maxSpellSlots,
-                    "potions" to h.potions, "gold" to h.gold,
-                    "weaponBonus" to h.weaponBonus, "armorBonus" to h.armorBonus,
-                    "secondWind" to h.secondWindAvailable, "actionSurge" to h.actionSurgeAvailable,
-                    "deathSuccesses" to h.deathSuccesses, "deathFailures" to h.deathFailures,
-                    "stable" to h.stable, "dead" to h.dead,
-                    "x" to h.x, "y" to h.y, "dodging" to h.dodging, "marked" to h.marked,
-                )
-            },
+            "heroes" to party.map { it.toSave() },
+            "bag" to bag.map { it.toSave() },
             "monsters" to monsters.map { m ->
                 linkedMapOf(
                     "type" to m.type.name, "maxHp" to m.maxHp, "hp" to m.hp, "x" to m.x, "y" to m.y,
-                    "aware" to m.aware, "surprised" to m.surprised, "reaction" to m.reactionAvailable,
+                    "aware" to m.aware, "surprised" to m.surprised, "reaction" to m.reactionAvailable, "asleep" to m.asleep,
                     "dodging" to m.dodging, "marked" to m.marked,
                 )
             },
@@ -1365,7 +1554,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 },
                 "explored" to d.explored.joinToString("") { if (it) "1" else "0" },
                 "rooms" to d.rooms.map { listOf(it.x, it.y, it.w, it.h) },
-                "items" to d.items.map { listOf(it.x, it.y, it.kind.name) },
+                "items" to d.items.map { listOf(it.x, it.y, it.kind.name, it.item?.toSave()) },
                 "start" to pt(d.start), "stairs" to pt(d.stairs),
             ),
             "combat" to linkedMapOf(
@@ -1381,35 +1570,17 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     }
 
     companion object {
-        const val SAVE_VERSION = 1
+        const val SAVE_VERSION = 2
+        const val REVIVIFY_COST = 300
 
         /** Rebuilds a game from [toSave] output. Throws IllegalArgumentException on a bad or incompatible save. */
         fun fromSave(map: Map<String, Any?>, dice: Dice = Dice()): Game {
             val o = JsonObj(map)
-            require(o.int("version") == SAVE_VERSION) { "Save is from an incompatible version" }
+            val version = o.int("version")
+            require(version in 1..SAVE_VERSION) { "Save is from an incompatible version" }
             fun pt(v: Any?) = (v as List<*>).let { Point((it[0] as Number).toInt(), (it[1] as Number).toInt()) }
 
-            val party = o.objs("heroes").map { h ->
-                Hero(h.str("name"), Race.valueOf(h.str("race")), CharClass.valueOf(h.str("class")),
-                    AbilityScores.of(*h.ints("abilities"))).apply {
-                    restoreProgress(h.int("level"), h.int("xp"), h.int("maxHp"), h.ints("slots"), h.ints("maxSlots"))
-                    hp = h.int("hp")
-                    hitDice = h.int("hitDice")
-                    potions = h.int("potions")
-                    gold = h.int("gold")
-                    weaponBonus = h.int("weaponBonus")
-                    armorBonus = h.int("armorBonus")
-                    secondWindAvailable = h.bool("secondWind")
-                    actionSurgeAvailable = h.bool("actionSurge")
-                    deathSuccesses = h.int("deathSuccesses")
-                    deathFailures = h.int("deathFailures")
-                    stable = h.bool("stable")
-                    dead = h.bool("dead")
-                    moveTo(h.int("x"), h.int("y"))
-                    dodging = h.bool("dodging")
-                    marked = h.bool("marked")
-                }
-            }
+            val party = o.objs("heroes").map { Hero.fromSave(it, version) }
             require(party.isNotEmpty()) { "Save has no heroes" }
             val g = Game(party, dice, fresh = false)
 
@@ -1428,7 +1599,8 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             }
             dj.list("items").forEach { it ->
                 val v = it as List<*>
-                d.items += FloorItem((v[0] as Number).toInt(), (v[1] as Number).toInt(), ItemKind.valueOf(v[2] as String))
+                d.items += FloorItem((v[0] as Number).toInt(), (v[1] as Number).toInt(), ItemKind.valueOf(v[2] as String),
+                    v.getOrNull(3)?.let { Item.fromSave(it) })
             }
             d.start = pt(dj.list("start"))
             d.stairs = pt(dj.list("stairs"))
@@ -1441,11 +1613,13 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                     aware = m.bool("aware")
                     surprised = m.bool("surprised")
                     reactionAvailable = m.bool("reaction")
+                    asleep = m.has("asleep") && m.bool("asleep")
                     dodging = m.bool("dodging")
                     marked = m.bool("marked")
                 }
             }
 
+            if (o.has("bag")) o.list("bag").forEach { g.bag += Item.fromSave(it) }
             g.depth = o.int("depth")
             g.phase = Phase.valueOf(o.str("phase"))
             g.leaderIndex = o.int("leaderIndex").coerceIn(party.indices)

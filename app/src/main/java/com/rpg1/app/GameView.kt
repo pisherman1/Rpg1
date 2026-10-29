@@ -19,6 +19,9 @@ import com.rpg1.core.Fx
 import com.rpg1.core.FxKind
 import com.rpg1.core.Game
 import com.rpg1.core.Hero
+import com.rpg1.core.Item
+import com.rpg1.core.ItemSlot
+import com.rpg1.core.ActionId
 import com.rpg1.core.ItemKind
 import com.rpg1.core.LogKind
 import com.rpg1.core.Monster
@@ -103,6 +106,18 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
     private val game: Game? get() = GameSession.game
 
+    // --- Level-up, inventory and spell picker --------------------------------
+    private var levelUpHero: Hero? = null
+    private val asiDraft = mutableMapOf<Ability, Int>()
+    private var inventoryOpen = false
+    private var invHeroIndex = 0
+    private var invSelectedItem: Item? = null
+    private var invSelectedSlot: ItemSlot? = null
+    private var spellMenuFor: Hero? = null
+
+    /** Overlays that pause the game while open. */
+    private val paused get() = menuOpen || levelUpHero != null || inventoryOpen
+
     // --- Save/load menu -----------------------------------------------------
     private var menuOpen = false
     private var slotInfos: Map<Int, SaveStore.SlotInfo?> = emptyMap()
@@ -131,7 +146,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         lastFrameMs = nowMs
         val g = game
         if (screen == Screen.PLAY && g != null) {
-            if (!menuOpen) {
+            if (!paused) {
                 val interval = when {
                     g.phase == Phase.MONSTER_TURN -> 240L
                     g.inCombat -> 150L
@@ -144,7 +159,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
                 checkAutosave(g)
             }
             animator.setViewport(mapW, height, tilePx / 16)
-            animator.update(g, g.drainFx(), if (menuOpen) 0f else dt)
+            animator.update(g, g.drainFx(), if (paused) 0f else dt)
             host.submitWorld(if (canvasWorld) null else animator.buildFrame(g))
         } else {
             host.submitWorld(null)
@@ -195,6 +210,8 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     /** Returns true if the back press was consumed. */
     fun handleBack(): Boolean {
         if (menuOpen) { menuOpen = false; return true }
+        if (levelUpHero != null) { levelUpHero = null; return true }
+        if (inventoryOpen) { inventoryOpen = false; return true }
         if (sheetHero != null) { sheetHero = null; return true }
         if (logExpanded) { logExpanded = false; return true }
         return false
@@ -436,6 +453,8 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         c.restore()
         drawPanel(c, g)
         sheetHero?.let { drawSheet(c, it) }
+        levelUpHero?.let { drawLevelUp(c, it) }
+        if (inventoryOpen) drawInventory(c, g)
         if (g.phase == Phase.GAME_OVER) drawGameOver(c, g)
     }
 
@@ -512,6 +531,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
                 ItemKind.CHEST -> Sprites.CHEST
                 ItemKind.POTION -> Sprites.POTION
                 ItemKind.GOLD -> Sprites.GOLD
+                ItemKind.TREASURE -> Sprites.TREASURE
             }
             c.drawBitmap(SpriteCache.get(s), null, tileRect(item.x, item.y), pixelPaint)
         }
@@ -609,8 +629,16 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         box(c, RectF(0f, 0f, mapW.toFloat(), hs * 2.6f), 0xA0000000.toInt())
         drawText(c, header, pad, hs * 1.1f, hs, cGold)
         val menuW = hs * 4f
-        drawFitText(c, g.prompt, pad, hs * 2.2f, hs * 0.8f, mapW - pad * 3 - menuW, cText)
+        drawFitText(c, g.prompt, pad, hs * 2.2f, hs * 0.8f, mapW - pad * 4 - menuW * 2, cText)
         button(c, RectF(mapW - pad - menuW, pad, mapW - pad, hs * 2.6f - pad), "Menu") { openMenu() }
+        val bagLabel = if (g.bag.isEmpty()) "Bag" else "Bag ${g.bag.size}"
+        button(c, RectF(mapW - pad * 2 - menuW * 2, pad, mapW - pad * 2 - menuW, hs * 2.6f - pad), bagLabel,
+            active = g.bag.isNotEmpty() && g.canChangeEquipment) {
+            inventoryOpen = true
+            invSelectedItem = null
+            invSelectedSlot = null
+            invHeroIndex = g.party.indexOfFirst { !it.dead }.coerceAtLeast(0)
+        }
 
         // Combat log
         val lines = if (logExpanded) 18 else 5
@@ -687,7 +715,13 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
             val info = RectF(r.right - rowH * 0.42f, r.top + pad * 0.5f, r.right - pad * 0.5f, r.top + rowH * 0.38f)
             button(c, info, "i") { sheetHero = hero }
-            hit(RectF(r.left, r.top, info.left, r.bottom)) { g.selectHero(i) }
+            var hitRight = info.left
+            if (hero.hasPendingChoices && !hero.dead) {
+                val up = RectF(info.left - pad * 0.5f - info.width(), info.top, info.left - pad * 0.5f, info.bottom)
+                button(c, up, "▲", active = true) { openLevelUp(hero) }
+                hitRight = up.left
+            }
+            hit(RectF(r.left, r.top, hitRight, r.bottom)) { g.selectHero(i) }
             y += rowH
         }
 
@@ -718,16 +752,43 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             y += ts * 1.6f
         }
 
-        // Action buttons
+        // Action buttons; spells live in their own sub-menu.
         val actions = g.availableActions()
+        val active = g.activeHero
+        if (spellMenuFor != null && spellMenuFor !== active) spellMenuFor = null
+        val spells = actions.filter { it.id == ActionId.SPELL }
+        val showSpells = spellMenuFor != null && spells.isNotEmpty()
         val cols = 2
         val bh = h * 0.075f
         val bw = (w - pad * 3) / cols
-        actions.forEachIndexed { i, a ->
+        class Btn(val label: String, val enabled: Boolean, val active: Boolean, val onTap: () -> Unit)
+        val buttons = mutableListOf<Btn>()
+        if (showSpells) {
+            buttons += Btn("◀ Back", true, false) { spellMenuFor = null }
+            val slots = active?.spellSlots?.takeIf { it.isNotEmpty() }?.joinToString("/") ?: "-"
+            buttons += Btn("Slots $slots", false, false) {}
+            for (a in spells) buttons += Btn(a.label, a.enabled, a.active) {
+                g.perform(a)
+                spellMenuFor = null
+            }
+        } else {
+            val first = actions.takeWhile { it.id == ActionId.END_TURN || it.id == ActionId.DESCEND }
+            first.forEach { a -> buttons += Btn(a.label, a.enabled, a.active) { g.perform(a) } }
+            if (spells.isNotEmpty()) {
+                val armed = spells.any { it.active }
+                buttons += Btn(if (armed) "Spells ✦" else "Spells ▸", spells.any { it.enabled } || armed, armed) {
+                    spellMenuFor = active
+                }
+            }
+            actions.drop(first.size).filter { it.id != ActionId.SPELL }.forEach { a ->
+                buttons += Btn(a.label, a.enabled, a.active) { g.perform(a) }
+            }
+        }
+        buttons.forEachIndexed { i, b ->
             val bx = left + pad + (i % cols) * (bw + pad)
             val by = y + (i / cols) * (bh + pad)
             if (by + bh > h) return@forEachIndexed
-            button(c, RectF(bx, by, bx + bw, by + bh), a.label, a.enabled, a.active) { g.perform(a) }
+            button(c, RectF(bx, by, bx + bw, by + bh), b.label, b.enabled, b.active, b.onTap)
         }
     }
 
@@ -787,18 +848,28 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             drawFitText(c, "Spell attack ${formatModifier(hero.spellAttackBonus)}  ·  Save DC ${hero.spellSaveDc}  ·  Slots ${hero.spellSlots.joinToString("/")}",
                 r.left + pad, y, ls, width, cGold)
             y += lh
-            for (spell in hero.charClass.spells) {
-                val lvl = if (spell.isCantrip) "cantrip" else "level ${spell.level}"
-                drawFitText(c, "${spell.displayName} ($lvl): ${spell.description}", r.left + pad, y, ls * 0.9f, width, cText)
-                y += lh * 0.9f
+            val known = hero.knownSpells.sortedBy { it.level }.joinToString(", ") {
+                if (it.isCantrip) it.displayName else "${it.displayName} (${it.level})"
             }
+            drawFitText(c, "Spells: $known", r.left + pad, y, ls * 0.9f, width, cText)
+            y += lh * 0.9f
         }
+        val gear = hero.equipment.values.joinToString(", ") { it.nameFor(hero) }.ifEmpty { "none" }
+        drawFitText(c, "Magic items: $gear", r.left + pad, y, ls * 0.9f, width, 0xFF5ED35E.toInt())
+        y += lh * 0.9f
         drawFitText(c, "Features: ${hero.charClass.features}", r.left + pad, y, ls * 0.9f, width, cDim)
         y += lh * 0.9f
         drawFitText(c, "Race: ${hero.race.trait}", r.left + pad, y, ls * 0.9f, width, cDim)
         y += lh * 0.9f
         drawFitText(c, "Armor: ${hero.charClass.armor.name}" + if (hero.armorBonus > 0) " +${hero.armorBonus}" else "",
             r.left + pad, y, ls * 0.9f, width, cDim)
+        if (hero.hasPendingChoices && !hero.dead) {
+            val b = RectF(r.right - pad - w * 0.18f, r.top + pad, r.right - pad, r.top + pad + h * 0.08f)
+            button(c, b, "▲ Level up", active = true) {
+                sheetHero = null
+                openLevelUp(hero)
+            }
+        }
         drawText(c, "tap to close", r.right - pad, r.bottom - pad, h * 0.025f, cDim, Paint.Align.RIGHT)
     }
 
@@ -896,5 +967,204 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         val r = RectF((width - tw) / 2, h * 0.42f, (width + tw) / 2, h * 0.42f + size * 2.2f)
         box(c, r, 0xF0201A2C.toInt(), cGold, 3f)
         drawText(c, toastText, r.centerX(), r.centerY() + size * 0.35f, size, cText, Paint.Align.CENTER)
+    }
+
+    // =======================================================================
+    // Level up
+    // =======================================================================
+
+    private fun openLevelUp(hero: Hero) {
+        levelUpHero = hero
+        asiDraft.clear()
+    }
+
+    private fun drawLevelUp(c: Canvas, hero: Hero) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        fill.color = 0xD0000000.toInt()
+        c.drawRect(0f, 0f, w, h, fill)
+        hit(RectF(0f, 0f, w, h)) {}
+        val r = RectF(w * 0.06f, h * 0.05f, w * 0.94f, h * 0.95f)
+        box(c, r, cPanel, cGold, 4f)
+        val pad = h * 0.025f
+        val s = h * 0.13f
+        heroSprite(c, hero, r.left + pad, r.top + pad, s)
+        drawText(c, "▲ ${hero.name} · Level ${hero.level} ${hero.charClass.displayName}", r.left + pad * 2 + s, r.top + pad + s * 0.45f,
+            h * 0.05f, cGold)
+        drawText(c, "HP ${hero.maxHp}  ·  Proficiency +${hero.proficiency}" +
+            if (hero.charClass.isCaster) "  ·  Spell slots ${hero.maxSpellSlots.joinToString("/")}" else "",
+            r.left + pad * 2 + s, r.top + pad + s * 0.85f, h * 0.03f, cDim)
+
+        val top = r.top + pad * 2 + s
+        val bottom = r.bottom - pad * 2 - h * 0.09f
+        val both = hero.pendingAbilityPoints > 0 && hero.pendingSpells > 0
+        val split = if (both) r.left + r.width() * 0.45f else r.right
+        if (hero.pendingAbilityPoints > 0) drawAsi(c, hero, RectF(r.left + pad, top, split - pad, bottom))
+        if (hero.pendingSpells > 0) drawSpellPicks(c, hero, RectF(if (both) split + pad else r.left + pad, top, r.right - pad, bottom))
+        if (!hero.hasPendingChoices) {
+            drawText(c, "All choices made!", r.centerX(), (top + bottom) / 2, h * 0.05f, cText, Paint.Align.CENTER)
+        }
+        val bw = w * 0.2f
+        button(c, RectF(r.right - pad - bw, r.bottom - pad - h * 0.09f, r.right - pad, r.bottom - pad),
+            if (hero.hasPendingChoices) "Later" else "Done", active = !hero.hasPendingChoices) { levelUpHero = null }
+    }
+
+    private fun drawAsi(c: Canvas, hero: Hero, area: RectF) {
+        val h = height.toFloat()
+        val used = asiDraft.values.sum()
+        val budget = minOf(2, hero.pendingAbilityPoints)
+        drawText(c, "Ability Score Improvement", area.left, area.top + h * 0.04f, h * 0.038f, cGold)
+        drawText(c, "+2 to one score or +1 to two (max 20). Points: ${budget - used}", area.left, area.top + h * 0.08f, h * 0.027f, cDim)
+        val rowH = (area.height() - h * 0.22f) / 6
+        Ability.entries.forEachIndexed { i, a ->
+            val y = area.top + h * 0.11f + i * rowH
+            val row = RectF(area.left, y, area.right, y + rowH * 0.85f)
+            box(c, row, cPanelLight)
+            val base = hero.baseAbilities[a]
+            val add = asiDraft[a] ?: 0
+            drawText(c, a.label, row.left + h * 0.02f, row.centerY() + rowH * 0.12f, rowH * 0.34f, cText)
+            val scoreText = if (add > 0) "$base → ${base + add}" else "$base"
+            drawText(c, scoreText, row.left + row.width() * 0.52f, row.centerY() + rowH * 0.12f, rowH * 0.36f,
+                if (add > 0) cGold else cText, Paint.Align.CENTER)
+            val bs = row.height() * 0.8f
+            val plus = RectF(row.right - bs - h * 0.01f, row.centerY() - bs / 2, row.right - h * 0.01f, row.centerY() + bs / 2)
+            val minus = RectF(plus.left - bs - h * 0.01f, plus.top, plus.left - h * 0.01f, plus.bottom)
+            button(c, plus, "+", enabled = used < budget && base + add < 20) { asiDraft[a] = add + 1 }
+            button(c, minus, "−", enabled = add > 0) { if (add <= 1) asiDraft.remove(a) else asiDraft[a] = add - 1 }
+        }
+        val by = area.bottom - h * 0.09f
+        button(c, RectF(area.left, by, area.left + area.width() * 0.48f, area.bottom), "Reset", enabled = used > 0) { asiDraft.clear() }
+        button(c, RectF(area.right - area.width() * 0.48f, by, area.right, area.bottom), "Apply", enabled = used > 0, active = used == budget) {
+            if (hero.improveAbilities(asiDraft.toMap())) asiDraft.clear()
+        }
+    }
+
+    private fun drawSpellPicks(c: Canvas, hero: Hero, area: RectF) {
+        val h = height.toFloat()
+        drawText(c, "Learn a spell (${hero.pendingSpells} to choose)", area.left, area.top + h * 0.04f, h * 0.038f, cGold)
+        val options = hero.learnableSpells().sortedWith(compareBy({ it.level }, { it.displayName }))
+        val rowH = minOf(h * 0.13f, (area.height() - h * 0.07f) / maxOf(1, options.size))
+        options.forEachIndexed { i, spell ->
+            val y = area.top + h * 0.07f + i * rowH
+            val row = RectF(area.left, y, area.right, y + rowH * 0.9f)
+            box(c, row, cPanelLight, 0xFF4E4266.toInt(), 2f)
+            val lvl = if (spell.isCantrip) "Cantrip" else "Level ${spell.level}" + if (spell.bonusAction) " · bonus action" else ""
+            drawFitText(c, spell.displayName, row.left + h * 0.015f, row.top + rowH * 0.36f, rowH * 0.3f, row.width() * 0.6f, cText)
+            drawFitText(c, lvl, row.right - h * 0.015f, row.top + rowH * 0.36f, rowH * 0.22f, row.width() * 0.38f, cDim, Paint.Align.RIGHT)
+            drawFitText(c, spell.description, row.left + h * 0.015f, row.top + rowH * 0.72f, rowH * 0.2f, row.width() - h * 0.03f, cDim)
+            hit(row) { hero.learnSpell(spell) }
+        }
+    }
+
+    // =======================================================================
+    // Inventory
+    // =======================================================================
+
+    private fun rarityColor(item: Item) = item.rarity.color
+
+    private fun drawInventory(c: Canvas, g: Game) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        fill.color = 0xD0000000.toInt()
+        c.drawRect(0f, 0f, w, h, fill)
+        hit(RectF(0f, 0f, w, h)) {}
+        val r = RectF(w * 0.04f, h * 0.04f, w * 0.96f, h * 0.96f)
+        box(c, r, cPanel, cGold, 4f)
+        val pad = h * 0.02f
+        drawText(c, "PARTY GEAR", r.left + pad, r.top + h * 0.06f, h * 0.045f, cGold)
+        if (!g.canChangeEquipment) {
+            drawText(c, "Gear can't be changed during combat", r.left + w * 0.25f, r.top + h * 0.06f, h * 0.028f, cHpLow)
+        }
+
+        // Hero tabs
+        val tabW = r.width() * 0.2f
+        val tabH = (r.height() - h * 0.1f - pad) / 4
+        g.party.forEachIndexed { i, hero ->
+            val t = RectF(r.left + pad, r.top + h * 0.09f + i * tabH, r.left + pad + tabW, r.top + h * 0.09f + (i + 1) * tabH - pad)
+            box(c, t, if (i == invHeroIndex) cPanelLight else 0xFF16121C.toInt(), if (i == invHeroIndex) cGold else null, 3f)
+            val s = t.height() * 0.7f
+            heroSprite(c, hero, t.left + pad * 0.5f, t.centerY() - s / 2, s)
+            drawFitText(c, hero.name, t.left + s + pad, t.top + t.height() * 0.4f, t.height() * 0.22f, t.width() - s - pad * 1.5f,
+                if (hero.dead) cDim else cText)
+            drawFitText(c, if (hero.dead) "fallen" else "AC ${hero.armorClass} · HP ${hero.maxHp}", t.left + s + pad,
+                t.top + t.height() * 0.72f, t.height() * 0.17f, t.width() - s - pad * 1.5f, cDim)
+            hit(t) {
+                invHeroIndex = i
+                invSelectedSlot = null
+            }
+        }
+        val hero = g.party.getOrNull(invHeroIndex) ?: return
+
+        // Equipment slots
+        val colL = r.left + pad * 2 + tabW
+        val colW = r.width() * 0.36f
+        val slotH = (r.height() - h * 0.1f - pad) / ItemSlot.entries.size
+        ItemSlot.entries.forEachIndexed { i, slot ->
+            val row = RectF(colL, r.top + h * 0.09f + i * slotH, colL + colW, r.top + h * 0.09f + (i + 1) * slotH - pad * 0.4f)
+            val item = hero.item(slot)
+            val selected = invSelectedSlot == slot
+            box(c, row, cPanelLight, if (selected) cGold else null, 3f)
+            drawText(c, slot.label, row.left + pad * 0.6f, row.centerY() + row.height() * 0.13f, row.height() * 0.32f, cDim)
+            drawFitText(c, item?.nameFor(hero) ?: "—", row.left + colW * 0.3f, row.centerY() + row.height() * 0.13f,
+                row.height() * 0.38f, colW * 0.68f, item?.let { rarityColor(it) } ?: cDim)
+            hit(row) {
+                invSelectedSlot = if (item != null) slot else null
+                invSelectedItem = null
+            }
+        }
+
+        // Bag and details
+        val bagL = colL + colW + pad
+        val bagR = r.right - pad
+        val detailTop = r.bottom - pad - h * 0.3f
+        drawText(c, "Bag (${g.bag.size})", bagL, r.top + h * 0.12f, h * 0.032f, cGold)
+        val itemH = h * 0.065f
+        val maxRows = ((detailTop - r.top - h * 0.14f) / itemH).toInt()
+        if (g.bag.isEmpty()) drawText(c, "Empty. Treasure from chests and monsters lands here.", bagL, r.top + h * 0.18f, h * 0.025f, cDim)
+        g.bag.take(maxRows).forEachIndexed { i, item ->
+            val row = RectF(bagL, r.top + h * 0.14f + i * itemH, bagR, r.top + h * 0.14f + (i + 1) * itemH - pad * 0.4f)
+            box(c, row, cPanelLight, if (invSelectedItem === item) cGold else null, 3f)
+            drawFitText(c, item.name, row.left + pad * 0.6f, row.centerY() + row.height() * 0.15f, row.height() * 0.42f,
+                row.width() * 0.62f, rarityColor(item))
+            drawText(c, item.slot.label, row.right - pad * 0.6f, row.centerY() + row.height() * 0.15f, row.height() * 0.32f, cDim, Paint.Align.RIGHT)
+            hit(row) {
+                invSelectedItem = item
+                invSelectedSlot = null
+            }
+        }
+
+        val detail = RectF(bagL, detailTop, bagR, r.bottom - pad)
+        box(c, detail, 0xFF16121C.toInt(), 0xFF4E4266.toInt(), 2f)
+        val shown = invSelectedItem ?: invSelectedSlot?.let { hero.item(it) }
+        if (shown != null) {
+            drawFitText(c, if (invSelectedItem != null) shown.name else shown.nameFor(hero), detail.left + pad, detail.top + h * 0.05f,
+                h * 0.035f, detail.width() - pad * 2, rarityColor(shown))
+            drawText(c, "${shown.rarity.label} · ${shown.slot.label}", detail.left + pad, detail.top + h * 0.09f, h * 0.025f, cDim)
+            val lines = wrap(shown.description, h * 0.026f, detail.width() - pad * 2)
+            lines.take(2).forEachIndexed { i, line -> drawText(c, line, detail.left + pad, detail.top + h * 0.13f + i * h * 0.033f, h * 0.026f, cText) }
+            val bw = detail.width() * 0.55f
+            val br = RectF(detail.right - pad - bw, detail.bottom - pad - h * 0.07f, detail.right - pad, detail.bottom - pad)
+            if (invSelectedItem != null) {
+                val usable = shown.usableBy(hero) && !hero.dead
+                val label = when {
+                    hero.dead -> "${hero.name} has fallen"
+                    !shown.usableBy(hero) -> "Casters only"
+                    hero.item(shown.slot) != null -> "Swap onto ${hero.name}"
+                    else -> "Equip on ${hero.name}"
+                }
+                button(c, br, label, enabled = usable && g.canChangeEquipment, active = usable) {
+                    if (g.equip(hero, shown)) invSelectedItem = null
+                }
+            } else {
+                button(c, br, "Unequip", enabled = g.canChangeEquipment) {
+                    invSelectedSlot?.let { g.unequip(hero, it) }
+                    invSelectedSlot = null
+                }
+            }
+        } else {
+            drawText(c, "Tap an item in the bag or a slot to see it.", detail.left + pad, detail.top + h * 0.06f, h * 0.026f, cDim)
+        }
+        val close = RectF(r.right - pad - w * 0.12f, r.top + pad, r.right - pad, r.top + pad + h * 0.065f)
+        button(c, close, "Close") { inventoryOpen = false }
     }
 }

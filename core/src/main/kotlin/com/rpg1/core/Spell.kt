@@ -1,7 +1,19 @@
 package com.rpg1.core
 
-/** ALLY spells touch: self or an adjacent party member (anyone in the party outside combat). */
-enum class SpellTarget { ENEMY, ALLY, ADJACENT_AREA }
+enum class SpellTarget {
+    /** One visible enemy in range. */
+    ENEMY,
+    /** Every enemy within [Spell.radius] of a target enemy. */
+    ENEMY_AREA,
+    /** Every enemy next to the caster. */
+    ADJACENT_AREA,
+    /** One hero: touch in combat when range is 1, anyone outside combat. */
+    ALLY,
+    /** The whole party (within range in combat). */
+    PARTY,
+    /** A fallen hero. */
+    DEAD_ALLY,
+}
 
 enum class Spell(
     val displayName: String,
@@ -11,45 +23,63 @@ enum class Spell(
     val range: Int,
     val dice: DiceExpr,
     val damageType: String,
-    val saveAbility: Ability? = null,
     val description: String,
+    val saveAbility: Ability? = null,
+    /** Extra dice per slot level above the spell's level. */
+    val upcastDice: Int = 0,
+    val radius: Int = 0,
+    val bonusAction: Boolean = false,
+    val outOfCombatOnly: Boolean = false,
+    val shortName: String = displayName,
 ) {
-    FIRE_BOLT(
-        "Fire Bolt", 0, SpellTarget.ENEMY, 10, d("1d10"), "fire",
-        description = "Ranged spell attack, 1d10 fire. Cantrip.",
-    ),
-    MAGIC_MISSILE(
-        "Magic Missile", 1, SpellTarget.ENEMY, 10, d("1d4+1"), "force",
-        description = "3 darts of 1d4+1 force that never miss. +1 dart per slot level.",
-    ),
-    BURNING_HANDS(
-        "Burning Hands", 1, SpellTarget.ADJACENT_AREA, 1, d("3d6"), "fire", Ability.DEX,
-        description = "All adjacent foes: DEX save or 3d6 fire (half on success).",
-    ),
-    SACRED_FLAME(
-        "Sacred Flame", 0, SpellTarget.ENEMY, 8, d("1d8"), "radiant", Ability.DEX,
-        description = "DEX save or 1d8 radiant. Cantrip.",
-    ),
-    CURE_WOUNDS(
-        "Cure Wounds", 1, SpellTarget.ALLY, 1, d("1d8"), "healing",
-        description = "Touch: heal 1d8 + WIS. +1d8 per slot level.",
-    ),
-    GUIDING_BOLT(
-        "Guiding Bolt", 1, SpellTarget.ENEMY, 10, d("4d6"), "radiant",
-        description = "Ranged spell attack, 4d6 radiant; next attack on target has advantage.",
-    );
+    // --- Wizard -------------------------------------------------------------
+    FIRE_BOLT("Fire Bolt", 0, SpellTarget.ENEMY, 10, d("1d10"), "fire",
+        "Ranged spell attack: 1d10 fire."),
+    RAY_OF_FROST("Ray of Frost", 0, SpellTarget.ENEMY, 10, d("1d8"), "cold",
+        "Ranged spell attack: 1d8 cold.", shortName = "Frost Ray"),
+    MAGIC_MISSILE("Magic Missile", 1, SpellTarget.ENEMY, 10, d("1d4+1"), "force",
+        "3 darts of 1d4+1 force that never miss. +1 dart per higher slot.", upcastDice = 1, shortName = "Missile"),
+    BURNING_HANDS("Burning Hands", 1, SpellTarget.ADJACENT_AREA, 1, d("3d6"), "fire",
+        "Adjacent foes: DEX save or 3d6 fire, half on a save. +1d6 per higher slot.",
+        Ability.DEX, upcastDice = 1, shortName = "Burn Hands"),
+    SLEEP("Sleep", 1, SpellTarget.ENEMY_AREA, 10, d("5d8"), "sleep",
+        "5d8 HP worth of foes near the target fall asleep, weakest first. +2d8 per higher slot.",
+        upcastDice = 2, radius = 2),
+    SCORCHING_RAY("Scorching Ray", 2, SpellTarget.ENEMY, 10, d("2d6"), "fire",
+        "3 rays, each a spell attack for 2d6 fire. +1 ray per higher slot.", upcastDice = 1, shortName = "Scorch Ray"),
+    SHATTER("Shatter", 2, SpellTarget.ENEMY_AREA, 10, d("3d8"), "thunder",
+        "Foes around the target: CON save or 3d8 thunder, half on a save. +1d8 per higher slot.",
+        Ability.CON, upcastDice = 1, radius = 1),
+    FIREBALL("Fireball", 3, SpellTarget.ENEMY_AREA, 12, d("8d6"), "fire",
+        "Foes within 10 ft of the target: DEX save or 8d6 fire, half on a save. +1d6 per higher slot.",
+        Ability.DEX, upcastDice = 1, radius = 2),
+
+    // --- Cleric -------------------------------------------------------------
+    SACRED_FLAME("Sacred Flame", 0, SpellTarget.ENEMY, 8, d("1d8"), "radiant",
+        "DEX save or 1d8 radiant.", Ability.DEX, shortName = "Sacred Fl."),
+    TOLL_THE_DEAD("Toll the Dead", 0, SpellTarget.ENEMY, 8, d("1d8"), "necrotic",
+        "WIS save or 1d8 necrotic (1d12 if it's already hurt).", Ability.WIS, shortName = "Toll Dead"),
+    GUIDING_BOLT("Guiding Bolt", 1, SpellTarget.ENEMY, 10, d("4d6"), "radiant",
+        "Ranged spell attack: 4d6 radiant; the next attack on the target has advantage. +1d6 per higher slot.",
+        upcastDice = 1, shortName = "Guide Bolt"),
+    CURE_WOUNDS("Cure Wounds", 1, SpellTarget.ALLY, 1, d("1d8"), "healing",
+        "Touch: heal 1d8 + WIS. +1d8 per higher slot.", upcastDice = 1, shortName = "Cure"),
+    HEALING_WORD("Healing Word", 1, SpellTarget.ALLY, 6, d("1d4"), "healing",
+        "Bonus action, 30 ft: heal 1d4 + WIS. +1d4 per higher slot.", upcastDice = 1, bonusAction = true,
+        shortName = "Heal Word"),
+    BLESS("Bless", 1, SpellTarget.PARTY, 6, d("1d4"), "bless",
+        "Allies within 30 ft add 1d4 to attack rolls until the fight ends."),
+    PRAYER_OF_HEALING("Prayer of Healing", 2, SpellTarget.PARTY, 6, d("2d8"), "healing",
+        "Out of combat: every hero heals 2d8 + WIS. +1d8 per higher slot.", upcastDice = 1, outOfCombatOnly = true,
+        shortName = "Prayer"),
+    MASS_HEALING_WORD("Mass Healing Word", 3, SpellTarget.PARTY, 6, d("1d4"), "healing",
+        "Bonus action: allies within 30 ft heal 1d4 + WIS. +1d4 per higher slot.", upcastDice = 1, bonusAction = true,
+        shortName = "Mass Heal"),
+    REVIVIFY("Revivify", 3, SpellTarget.DEAD_ALLY, 0, d("1d1"), "life",
+        "Out of combat, costs 300 gold: a fallen hero returns with 1 HP.", outOfCombatOnly = true);
 
     val isCantrip get() = level == 0
-
-    /** Shown on buttons: short enough to fit. */
-    val shortName: String
-        get() = when (this) {
-            MAGIC_MISSILE -> "Missile"
-            BURNING_HANDS -> "Burn Hands"
-            SACRED_FLAME -> "Sacred Fl."
-            GUIDING_BOLT -> "Guide Bolt"
-            else -> displayName
-        }
+    val isHealing get() = damageType == "healing"
 }
 
 /** Spell slots per spell level (index 0 = 1st level) for a full caster, levels 1-10. */

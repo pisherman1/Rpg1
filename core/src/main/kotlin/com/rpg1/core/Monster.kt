@@ -101,6 +101,8 @@ class Monster(val type: MonsterType, override val maxHp: Int) : Creature(type.di
     /** Surprised creatures lose their first turn of combat and can't react until it ends. */
     var surprised = false
     var reactionAvailable = true
+    /** Sleep spell: loses its turns until damaged; attacks against it have advantage. */
+    var asleep = false
 
     val isDead get() = hp <= 0
 

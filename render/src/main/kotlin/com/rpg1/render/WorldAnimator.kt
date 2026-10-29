@@ -241,6 +241,10 @@ class WorldAnimator(private val atlas: Atlas) {
                         }
                     }
                     FxKind.INFO -> particles.burst(f.x * TILE + 8f, f.y * TILE + 8f, 0xFFD040, 8, 25f, 40f)
+                    FxKind.LOOT -> {
+                        particles.motes(f.x * TILE + 8f, f.y * TILE + 10f, 0xC080FF, 20, 7f)
+                        pulses += Pulse(f.x * TILE + 8f, f.y * TILE + 8f, 0xC080FF)
+                    }
                     else -> {}
                 }
                 // Melee attacker lunges at the target.
@@ -362,10 +366,17 @@ class WorldAnimator(private val atlas: Atlas) {
                 ItemKind.CHEST -> atlas.id("chest")
                 ItemKind.POTION -> atlas.id("potion")
                 ItemKind.GOLD -> atlas.id("gold")
+                ItemKind.TREASURE -> atlas.id("treasure")
             }
-            val bob = if (item.kind == ItemKind.POTION) floor(sin(time * 3f + item.x) * 1.2f) else 0f
+            val bobs = item.kind == ItemKind.POTION || item.kind == ItemKind.TREASURE
+            val bob = if (bobs) floor(sin(time * 3f + item.x) * 1.2f) else 0f
             sprite(sprites, id, px, py + bob)
             if (item.kind == ItemKind.POTION) light(px + 8, py + 9, 14f, 0xFF4040, 0.5f)
+            if (item.kind == ItemKind.TREASURE && d.isVisible(item.x, item.y)) {
+                val rarity = item.item?.rarity?.color ?: 0xFFFFFFFF.toInt()
+                light(px + 9, py + 8, 22f, rarity and 0xFFFFFF, 0.9f * flicker(item.x * 5 + item.y))
+                if (rng.nextFloat() < 0.04f) particles.motes(px + 10, py + 7, rarity and 0xFFFFFF, 1, 3f)
+            }
         }
 
         // Creatures, back to front
@@ -466,6 +477,7 @@ class WorldAnimator(private val atlas: Atlas) {
             FxKind.DAMAGE -> 0xFF5050
             FxKind.MISS -> 0xB0B0C0
             FxKind.INFO -> 0xFFD040
+            FxKind.LOOT -> 0xC080FF
         }
 
         /** Stable per-square pseudo-random number for decoration choices. */

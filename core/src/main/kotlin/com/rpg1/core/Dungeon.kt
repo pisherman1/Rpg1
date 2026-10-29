@@ -17,9 +17,10 @@ data class Room(val x: Int, val y: Int, val w: Int, val h: Int) {
     fun contains(px: Int, py: Int) = px in x until x + w && py in y until y + h
 }
 
-enum class ItemKind { CHEST, POTION, GOLD }
+enum class ItemKind { CHEST, POTION, GOLD, TREASURE }
 
-data class FloorItem(val x: Int, val y: Int, val kind: ItemKind)
+/** Something lying on the floor; a TREASURE holds a specific magic [item]. */
+data class FloorItem(val x: Int, val y: Int, val kind: ItemKind, val item: Item? = null)
 
 class Dungeon(val width: Int, val height: Int) {
     private val tiles = Array(width * height) { Tile.WALL }

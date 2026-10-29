@@ -597,10 +597,30 @@ object Sprites {
         "................",
     )
 
+    /** A glinting magic item lying on the floor. */
+    val TREASURE = s("treasure",
+        "................",
+        "................",
+        "................",
+        "................",
+        "...........w....",
+        "..........kck...",
+        ".........kcwck..",
+        "........kcccck..",
+        ".......kkcck....",
+        "......kyk.k.....",
+        ".....kyk........",
+        "....kNk.........",
+        "...kNk..........",
+        "..kkk...........",
+        "................",
+        "................",
+    )
+
     val all: List<Sprite> = listOf(
         FIGHTER, ROGUE, WIZARD, CLERIC,
         GIANT_RAT, KOBOLD, GOBLIN, SKELETON, ZOMBIE, ORC, GNOLL, GHOUL, BUGBEAR, OGRE,
         FLOOR, WALL, STAIRS, CHEST, POTION, GOLD, BONES, GRAVE,
-        WALL_TOP, FLOOR_CRACKED, FLOOR_MOSS, FLOOR_RUBBLE, TORCH_A, TORCH_B,
+        WALL_TOP, FLOOR_CRACKED, FLOOR_MOSS, FLOOR_RUBBLE, TORCH_A, TORCH_B, TREASURE,
     )
 }

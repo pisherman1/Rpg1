@@ -7,6 +7,8 @@ A pixel-art dungeon crawler for Android, played with a party of four using D&D 5
 Every push runs the **Build APK** GitHub Actions workflow. Open the latest run under
 **Actions**, download the `d20-dungeon-apk` artifact, unzip it and install `app-debug.apk`
 on your phone (you'll need to allow installing from unknown sources).
+Builds are signed with the debug key in `app/debug.keystore`, so each new build installs over
+the previous one and keeps your saves.
 
 To build locally you need the Android SDK (API 35) and JDK 17:
 
@@ -29,7 +31,12 @@ To build locally you need the Android SDK (API 35) and JDK 17:
 4. **Heal and rest.** Potions and Cure Wounds target a hero: arm them, then tap the hero or
    their portrait (in combat the target must be adjacent). Short rests spend hit dice; one long
    rest per depth restores everything, but resting may attract wandering monsters.
-5. **Descend.** Find the stairs and tap *Descend*. Deeper levels have tougher monsters, and
+5. **Level up.** XP from every kill is split between living heroes. When a hero has choices
+   to make, a gold **▲** appears on their portrait: tap it to spend ability score points
+   (levels 4 and 8, plus 6 for fighters) and learn new spells (casters, every level).
+6. **Gear up.** Treasure from chests, bosses and the occasional monster goes into the party
+   **Bag** (top right of the map). Open it outside combat to equip items on any hero.
+7. **Descend.** Find the stairs and tap *Descend*. Deeper levels have tougher monsters, and
    every 4th depth has an ogre guarding the stairs.
 
 **Saving.** The game autosaves when you leave the app, start a new depth, or finish a fight;
@@ -54,9 +61,17 @@ that hero's character sheet.
   hero are failures (melee hits auto-crit), massive-damage instant death, stabilising.
 - XP split between living heroes, levels 1–10 with the 5e XP table, HP and spell-slot growth.
 - Races: Human, Dwarf, Elf, Halfling (Lucky rerolls natural 1s).
-- Classes: Fighter (Second Wind, Action Surge), Rogue (Sneak Attack with advantage or an
-  adjacent ally, Aim, Cunning Action), Wizard (Fire Bolt, Magic Missile, Burning Hands),
-  Cleric (Sacred Flame, Guiding Bolt, Cure Wounds). Spells upcast with higher slots.
+- Classes: Fighter (Second Wind, Action Surge, Extra Attack at 5th), Rogue (Sneak Attack with
+  advantage or an adjacent ally, Aim, Cunning Action, Uncanny Dodge at 5th), Wizard and Cleric.
+- Spells (a new one learned every level, gated by slot level; higher slots upcast them):
+  - Wizard: Fire Bolt, Ray of Frost, Magic Missile, Burning Hands, Sleep, Scorching Ray,
+    Shatter, Fireball.
+  - Cleric: Sacred Flame, Toll the Dead, Guiding Bolt, Cure Wounds, Healing Word (bonus action),
+    Bless, Prayer of Healing, Mass Healing Word, Revivify (300 gold, brings back a fallen hero).
+- Ability score improvements (+2 / +1+1, max 20); CON raises max HP for every level.
+- Magic items (SRD): +1/+2/+3 weapons, armor and Wands of the War Mage, Ring and Cloak of
+  Protection, Amulet of Health, Gauntlets of Ogre Power, Headband of Intellect, Periapt of
+  Wound Closure, Boots of Striding. Rarity improves with depth; ogres always drop treasure.
 - Monsters from the SRD: giant rat, kobold, goblin, skeleton, zombie (Undead Fortitude),
   orc, gnoll, ghoul, bugbear, ogre. Encounters are sized from an XP budget per party level.
 

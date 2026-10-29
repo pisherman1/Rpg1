@@ -30,7 +30,28 @@ object Bot {
     private fun snapshot(g: Game) = listOf(g.phase, g.party.map { listOf(it.x, it.y, it.hp) }, g.turnIndex, g.round,
         g.monsters.sumOf { it.hp }, g.monsters.sumOf { it.x * 31 + it.y }, g.depth, g.log.lastOrNull())
 
+    /** Spends level-up choices and equips loot the simple way. */
+    fun manageParty(game: Game) {
+        for (h in game.livingHeroes) {
+            while (h.pendingAbilityPoints > 0) {
+                val a = h.charClass.abilityPriority.firstOrNull { h.baseAbilities[it] < 20 } ?: break
+                if (!h.improveAbilities(mapOf(a to 1))) break
+            }
+            while (h.pendingSpells > 0) {
+                val s = h.learnableSpells().maxByOrNull { it.level } ?: break
+                if (!h.learnSpell(s)) break
+            }
+        }
+        if (game.canChangeEquipment) {
+            for (item in game.bag.toList()) {
+                val taker = game.livingHeroes.firstOrNull { item.usableBy(it) && it.item(item.slot).let { cur -> cur == null || cur.bonus < item.bonus } }
+                if (taker != null) game.equip(taker, item)
+            }
+        }
+    }
+
     private fun decide(game: Game) {
+        manageParty(game)
         val hero = game.activeHero ?: return
         val actions = game.availableActions()
         fun act(id: ActionId, spell: Spell? = null) =
@@ -72,11 +93,10 @@ object Bot {
                     return
                 }
                 if (game.actionAvailable) {
-                    val spell = when (hero.charClass) {
-                        CharClass.WIZARD -> if (hero.canCast) Spell.MAGIC_MISSILE else null
-                        CharClass.CLERIC -> if (hero.canCast) Spell.GUIDING_BOLT else null
-                        else -> null
-                    }
+                    // Prefer the strongest known attack spell with a slot left.
+                    val spell = hero.knownSpells
+                        .filter { !it.isCantrip && !it.isHealing && it.target in setOf(SpellTarget.ENEMY, SpellTarget.ENEMY_AREA) && game.canCastNow(hero, it) }
+                        .maxByOrNull { it.level }
                     if (spell != null && target.distanceTo(hero) <= spell.range && game.dungeon.isVisible(target.x, target.y)) {
                         act(ActionId.SPELL, spell)
                         game.tap(target.x, target.y)
