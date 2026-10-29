@@ -87,9 +87,11 @@ enum class MonsterType(
     val isUndead get() = this == SKELETON || this == ZOMBIE || this == GHOUL
 }
 
-class Monster(val type: MonsterType, dice: Dice) : Creature(type.displayName) {
+class Monster(val type: MonsterType, override val maxHp: Int) : Creature(type.displayName) {
+    /** A fresh monster with hit points rolled from its hit dice. */
+    constructor(type: MonsterType, dice: Dice) : this(type, maxOf(1, dice.roll(type.hitDice)))
+
     override val abilities = AbilityScores.of(*type.scores)
-    override val maxHp: Int = maxOf(1, dice.roll(type.hitDice))
     override var hp: Int = maxHp
     override val armorClass get() = type.armorClass
     override val speed get() = type.speed

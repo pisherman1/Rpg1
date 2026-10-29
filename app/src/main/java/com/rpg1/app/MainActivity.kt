@@ -15,8 +15,14 @@ class MainActivity : Activity(), GameView.Host {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        GameSession.init(this)
         gameView = GameView(this, this)
         setContentView(gameView)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        GameSession.autosave()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

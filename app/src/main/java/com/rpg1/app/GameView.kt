@@ -96,6 +96,18 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
     private val game: Game? get() = GameSession.game
 
+    // --- Save/load menu -----------------------------------------------------
+    private var menuOpen = false
+    private var slotInfos: Map<Int, SaveStore.SlotInfo?> = emptyMap()
+    private var pendingOverwrite = -1
+    private var toastText = ""
+    private var toastUntil = 0L
+    private val dateFormat = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
+
+    // Autosave when a level starts, a fight ends or the party falls.
+    private var lastDepth = -1
+    private var lastPhase: Phase? = null
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         Choreographer.getInstance().postFrameCallback(this)
@@ -109,7 +121,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     override fun doFrame(frameTimeNanos: Long) {
         nowMs = frameTimeNanos / 1_000_000
         game?.let { g ->
-            if (screen == Screen.PLAY) {
+            if (screen == Screen.PLAY && !menuOpen) {
                 val interval = when {
                     g.phase == Phase.MONSTER_TURN -> 240L
                     g.inCombat -> 150L
@@ -119,6 +131,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
                     lastTick = nowMs
                     g.tick()
                 }
+                checkAutosave(g)
                 g.drainFx().forEach { liveFx += LiveFx(it, nowMs) }
                 liveFx.removeAll { nowMs - it.born > 1000 }
             }
@@ -127,8 +140,45 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         Choreographer.getInstance().postFrameCallback(this)
     }
 
+    private fun checkAutosave(g: Game) {
+        val combatEnded = lastPhase != null && lastPhase != Phase.EXPLORING && g.phase == Phase.EXPLORING
+        val fell = g.phase == Phase.GAME_OVER && lastPhase != Phase.GAME_OVER
+        if ((lastDepth != -1 && g.depth != lastDepth) || combatEnded || fell) GameSession.autosave()
+        lastDepth = g.depth
+        lastPhase = g.phase
+    }
+
+    private fun toast(message: String) {
+        toastText = message
+        toastUntil = nowMs + 2500
+    }
+
+    private fun openMenu() {
+        slotInfos = (listOf(SaveStore.AUTOSAVE) + SaveStore.MANUAL_SLOTS).associateWith { GameSession.store.info(it) }
+        pendingOverwrite = -1
+        menuOpen = true
+    }
+
+    private fun loadSlot(slot: Int) {
+        try {
+            GameSession.load(slot)
+            liveFx.clear()
+            camReady = false
+            logExpanded = false
+            sheetHero = null
+            menuOpen = false
+            lastDepth = -1
+            lastPhase = null
+            screen = Screen.PLAY
+            toast("Game loaded")
+        } catch (e: Exception) {
+            toast("Couldn't load: ${e.message}")
+        }
+    }
+
     /** Returns true if the back press was consumed. */
     fun handleBack(): Boolean {
+        if (menuOpen) { menuOpen = false; return true }
         if (sheetHero != null) { sheetHero = null; return true }
         if (logExpanded) { logExpanded = false; return true }
         return false
@@ -183,6 +233,8 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             Screen.PARTY -> drawPartyScreen(canvas)
             Screen.PLAY -> game?.let { drawPlay(canvas, it) } ?: run { screen = Screen.PARTY }
         }
+        if (menuOpen) drawMenu(canvas)
+        if (nowMs < toastUntil) drawToast(canvas)
     }
 
     /** Splits [s] into lines no wider than [maxWidth] at [size]. */
@@ -252,6 +304,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     // =======================================================================
 
     private fun drawPartyScreen(c: Canvas) {
+        if (slotInfos.isEmpty()) slotInfos = (listOf(SaveStore.AUTOSAVE) + SaveStore.MANUAL_SLOTS).associateWith { GameSession.store.info(it) }
         val w = width.toFloat()
         val h = height.toFloat()
         val builder = GameSession.builder
@@ -328,18 +381,25 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
         val by = h * 0.875f
         val bh = h * 0.09f
+        val bw = (w - pad * 5) / 4
+        fun slot(i: Int) = RectF(pad + i * (bw + pad), by, pad + i * (bw + pad) + bw, by + bh)
+        val hasAutosave = slotInfos[SaveStore.AUTOSAVE] != null
+        button(c, slot(0), "Continue", enabled = hasAutosave) { loadSlot(SaveStore.AUTOSAVE) }
+        button(c, slot(1), "Load Game") { openMenu() }
         if (Premades.parties.isNotEmpty()) {
             val party = Premades.parties[premadePartyIndex % Premades.parties.size]
-            button(c, RectF(pad, by, w * 0.5f - pad / 2, by + bh), "Premade party: ${party.name}") {
+            button(c, slot(2), "Premade: ${party.name}") {
                 builder.applyParty(party)
                 premadePartyIndex = (premadePartyIndex + 1) % Premades.parties.size
             }
         }
-        button(c, RectF(w * 0.5f + pad / 2, by, w - pad, by + bh), "Begin Adventure ▶", active = true) {
+        button(c, slot(3), "Begin Adventure ▶", active = true) {
             GameSession.startGame()
             liveFx.clear()
             camReady = false
             logExpanded = false
+            lastDepth = -1
+            lastPhase = null
             screen = Screen.PLAY
         }
     }
@@ -578,7 +638,9 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         val hs = height * 0.04f
         box(c, RectF(0f, 0f, mapW.toFloat(), hs * 2.6f), 0xA0000000.toInt())
         drawText(c, header, pad, hs * 1.1f, hs, cGold)
-        drawFitText(c, g.prompt, pad, hs * 2.2f, hs * 0.8f, mapW - pad * 2, cText)
+        val menuW = hs * 4f
+        drawFitText(c, g.prompt, pad, hs * 2.2f, hs * 0.8f, mapW - pad * 3 - menuW, cText)
+        button(c, RectF(mapW - pad - menuW, pad, mapW - pad, hs * 2.6f - pad), "Menu") { openMenu() }
 
         // Combat log
         val lines = if (logExpanded) 18 else 5
@@ -782,9 +844,87 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         drawText(c, g.party.joinToString("   ") { "${it.name} L${it.level}" }, w / 2, h * 0.53f, h * 0.032f, cDim, Paint.Align.CENTER)
         button(c, RectF(w * 0.35f, h * 0.62f, w * 0.65f, h * 0.73f), "New Party", active = true) {
             GameSession.newParty()
+            slotInfos = emptyMap()
             premadeIndex.fill(-1)
             sheetHero = null
             screen = Screen.PARTY
         }
+    }
+
+    private fun drawMenu(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val g = game
+        val canSave = screen == Screen.PLAY && g != null && g.phase != Phase.GAME_OVER
+        fill.color = 0xD0000000.toInt()
+        c.drawRect(0f, 0f, w, h, fill)
+        hit(RectF(0f, 0f, w, h)) {}
+        val r = RectF(w * 0.14f, h * 0.06f, w * 0.86f, h * 0.94f)
+        box(c, r, cPanel, cGold, 4f)
+        val pad = h * 0.025f
+        drawText(c, if (canSave) "GAME MENU" else "LOAD GAME", r.centerX(), r.top + h * 0.08f, h * 0.055f, cGold, Paint.Align.CENTER)
+
+        val rowH = h * 0.13f
+        var y = r.top + h * 0.12f
+        val bw = r.width() * 0.16f
+        for (slot in listOf(SaveStore.AUTOSAVE) + SaveStore.MANUAL_SLOTS) {
+            val info = slotInfos[slot]
+            val row = RectF(r.left + pad, y, r.right - pad, y + rowH - pad * 0.6f)
+            box(c, row, cPanelLight)
+            val name = if (slot == SaveStore.AUTOSAVE) "Autosave" else "Slot $slot"
+            val textW = row.width() - bw * 2 - pad * 4
+            drawText(c, name, row.left + pad, row.top + rowH * 0.34f, rowH * 0.24f, cGold)
+            if (info == null) {
+                drawText(c, "Empty", row.left + pad, row.top + rowH * 0.68f, rowH * 0.2f, cDim)
+            } else {
+                drawFitText(c, info.summary, row.left + pad, row.top + rowH * 0.62f, rowH * 0.19f, textW, cText)
+                drawText(c, dateFormat.format(java.util.Date(info.savedAt)), row.left + pad, row.top + rowH * 0.84f, rowH * 0.15f, cDim)
+            }
+            val loadR = RectF(row.right - pad - bw, row.top + pad * 0.6f, row.right - pad, row.bottom - pad * 0.6f)
+            button(c, loadR, "Load", enabled = info != null) { loadSlot(slot) }
+            if (canSave && slot != SaveStore.AUTOSAVE) {
+                val saveR = RectF(loadR.left - pad - bw, loadR.top, loadR.left - pad, loadR.bottom)
+                val confirming = pendingOverwrite == slot
+                button(c, saveR, if (confirming) "Overwrite?" else "Save", active = confirming) {
+                    if (info != null && !confirming) {
+                        pendingOverwrite = slot
+                    } else {
+                        try {
+                            GameSession.store.save(slot, g!!)
+                            toast("Saved to slot $slot")
+                        } catch (e: Exception) {
+                            toast("Save failed: ${e.message}")
+                        }
+                        openMenu()
+                    }
+                }
+            }
+            y += rowH
+        }
+
+        val by = r.bottom - pad - h * 0.09f
+        val half = (r.width() - pad * 3) / 2
+        button(c, RectF(r.left + pad, by, r.left + pad + half, by + h * 0.09f), if (canSave) "Resume" else "Back") { menuOpen = false }
+        if (screen == Screen.PLAY) {
+            button(c, RectF(r.right - pad - half, by, r.right - pad, by + h * 0.09f), "Save & Quit to Title") {
+                GameSession.autosave()
+                GameSession.newParty()
+                slotInfos = emptyMap()
+                premadeIndex.fill(-1)
+                sheetHero = null
+                menuOpen = false
+                screen = Screen.PARTY
+            }
+        }
+    }
+
+    private fun drawToast(c: Canvas) {
+        val h = height.toFloat()
+        val size = h * 0.035f
+        text.textSize = size
+        val tw = text.measureText(toastText) + size * 2
+        val r = RectF((width - tw) / 2, h * 0.42f, (width + tw) / 2, h * 0.42f + size * 2.2f)
+        box(c, r, 0xF0201A2C.toInt(), cGold, 3f)
+        drawText(c, toastText, r.centerX(), r.centerY() + size * 0.35f, size, cText, Paint.Align.CENTER)
     }
 }

@@ -32,6 +32,12 @@ To build locally you need the Android SDK (API 35) and JDK 17:
 5. **Descend.** Find the stairs and tap *Descend*. Deeper levels have tougher monsters, and
    every 4th depth has an ogre guarding the stairs.
 
+**Saving.** The game autosaves when you leave the app, start a new depth, or finish a fight;
+*Continue* on the title screen picks up from there. *Menu* (top right of the map) has three
+manual save slots plus *Save & Quit to Title*, and *Load Game* on the title screen loads any
+slot. Saves capture everything, even mid-combat. When the whole party falls, the autosave
+is deleted, but manual saves are kept.
+
 Tap the combat log to expand it; every roll is shown. The **i** button on a portrait opens
 that hero's character sheet.
 

@@ -84,6 +84,15 @@ class Hero(
         spellSlots[slotLevel - 1]--
     }
 
+    /** Restores progression when loading a saved game. */
+    fun restoreProgress(level: Int, xp: Int, maxHp: Int, spellSlots: IntArray, maxSpellSlots: IntArray) {
+        this.level = level
+        this.xp = xp
+        this.maxHp = maxHp
+        this.spellSlots = spellSlots
+        this.maxSpellSlots = maxSpellSlots
+    }
+
     /** Adds XP and returns a message for each level gained. */
     fun gainXp(amount: Int, dice: Dice): List<String> {
         xp += amount

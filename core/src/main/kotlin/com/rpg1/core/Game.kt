@@ -32,7 +32,9 @@ data class GameAction(
  * The whole game state for a party of heroes. The UI calls [tap], [selectHero] and [perform]
  * for input and [tick] on a timer; everything else is read-only state for rendering.
  */
-class Game(val party: List<Hero>, val dice: Dice = Dice()) {
+class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boolean) {
+    constructor(party: List<Hero>, dice: Dice = Dice()) : this(party, dice, fresh = true)
+
     var depth = 1
         private set
     lateinit var dungeon: Dungeon
@@ -98,6 +100,10 @@ class Game(val party: List<Hero>, val dice: Dice = Dice()) {
 
     init {
         require(party.isNotEmpty())
+        if (fresh) startAdventure()
+    }
+
+    private fun startAdventure() {
         log("The party enters the dungeon: " + party.joinToString(", ") {
             "${it.name} the ${it.race.displayName} ${it.charClass.displayName}"
         } + ".", LogKind.LEVEL)
@@ -1303,6 +1309,195 @@ class Game(val party: List<Hero>, val dice: Dice = Dice()) {
         log("${h.name} opens a chest: ${found.joinToString(", ")}.", LogKind.LOOT)
         pendingFx += Fx.Text(h.x, h.y, "+${gold}g", FxKind.INFO)
     }
+
+    // =======================================================================
+    // Save & load
+    // =======================================================================
+
+    /** Short description for save-slot lists. */
+    fun summary(): String = "Depth $depth · " + party.joinToString(", ") {
+        if (it.dead) "${it.name} (dead)" else "${it.name} L${it.level}"
+    }
+
+    /** The complete game state as a JSON-ready map. Everything not saved is derived on load. */
+    fun toSave(): Map<String, Any?> {
+        fun ref(c: Creature): String = if (c is Hero) "h${party.indexOf(c)}" else "m${monsters.indexOf(c)}"
+        fun pt(p: Point) = listOf(p.x, p.y)
+        val d = dungeon
+        return linkedMapOf(
+            "version" to SAVE_VERSION,
+            "summary" to summary(),
+            "depth" to depth,
+            "phase" to phase.name,
+            "leaderIndex" to leaderIndex,
+            "longRestUsed" to longRestUsed,
+            "kills" to kills,
+            "stairsHintShown" to stairsHintShown,
+            "trail" to trail.map(::pt),
+            "corpses" to corpses.map(::pt),
+            "graves" to graves.map(::pt),
+            "log" to log.toList().takeLast(60).map { listOf(it.kind.name, it.text) },
+            "heroes" to party.map { h ->
+                linkedMapOf(
+                    "name" to h.name, "race" to h.race.name, "class" to h.charClass.name,
+                    "abilities" to Ability.entries.map { h.abilities[it] },
+                    "level" to h.level, "xp" to h.xp, "maxHp" to h.maxHp, "hp" to h.hp,
+                    "hitDice" to h.hitDice, "slots" to h.spellSlots, "maxSlots" to h.maxSpellSlots,
+                    "potions" to h.potions, "gold" to h.gold,
+                    "weaponBonus" to h.weaponBonus, "armorBonus" to h.armorBonus,
+                    "secondWind" to h.secondWindAvailable, "actionSurge" to h.actionSurgeAvailable,
+                    "deathSuccesses" to h.deathSuccesses, "deathFailures" to h.deathFailures,
+                    "stable" to h.stable, "dead" to h.dead,
+                    "x" to h.x, "y" to h.y, "dodging" to h.dodging, "marked" to h.marked,
+                )
+            },
+            "monsters" to monsters.map { m ->
+                linkedMapOf(
+                    "type" to m.type.name, "maxHp" to m.maxHp, "hp" to m.hp, "x" to m.x, "y" to m.y,
+                    "aware" to m.aware, "surprised" to m.surprised, "reaction" to m.reactionAvailable,
+                    "dodging" to m.dodging, "marked" to m.marked,
+                )
+            },
+            "dungeon" to linkedMapOf(
+                "width" to d.width, "height" to d.height,
+                "tiles" to buildString {
+                    for (y in 0 until d.height) for (x in 0 until d.width) append(d[x, y].name.first())
+                },
+                "explored" to d.explored.joinToString("") { if (it) "1" else "0" },
+                "rooms" to d.rooms.map { listOf(it.x, it.y, it.w, it.h) },
+                "items" to d.items.map { listOf(it.x, it.y, it.kind.name) },
+                "start" to pt(d.start), "stairs" to pt(d.stairs),
+            ),
+            "combat" to linkedMapOf(
+                "turnOrder" to turnOrder.map(::ref),
+                "initiative" to turnOrder.map { initiativeRolls[it] ?: 0 },
+                "turnIndex" to turnIndex, "round" to round,
+                "movementLeft" to movementLeft, "action" to actionAvailable, "bonus" to bonusActionAvailable,
+                "sneakUsed" to sneakAttackUsed, "aiming" to aiming, "disengaged" to disengaged,
+                "moved" to movedThisTurn, "autoEnd" to autoEndTurn, "holderRemoved" to turnHolderRemoved,
+                "monsterSteps" to monsterStepsLeft, "monsterDone" to monsterDone,
+            ),
+        )
+    }
+
+    companion object {
+        const val SAVE_VERSION = 1
+
+        /** Rebuilds a game from [toSave] output. Throws IllegalArgumentException on a bad or incompatible save. */
+        fun fromSave(map: Map<String, Any?>, dice: Dice = Dice()): Game {
+            val o = JsonObj(map)
+            require(o.int("version") == SAVE_VERSION) { "Save is from an incompatible version" }
+            fun pt(v: Any?) = (v as List<*>).let { Point((it[0] as Number).toInt(), (it[1] as Number).toInt()) }
+
+            val party = o.objs("heroes").map { h ->
+                Hero(h.str("name"), Race.valueOf(h.str("race")), CharClass.valueOf(h.str("class")),
+                    AbilityScores.of(*h.ints("abilities"))).apply {
+                    restoreProgress(h.int("level"), h.int("xp"), h.int("maxHp"), h.ints("slots"), h.ints("maxSlots"))
+                    hp = h.int("hp")
+                    hitDice = h.int("hitDice")
+                    potions = h.int("potions")
+                    gold = h.int("gold")
+                    weaponBonus = h.int("weaponBonus")
+                    armorBonus = h.int("armorBonus")
+                    secondWindAvailable = h.bool("secondWind")
+                    actionSurgeAvailable = h.bool("actionSurge")
+                    deathSuccesses = h.int("deathSuccesses")
+                    deathFailures = h.int("deathFailures")
+                    stable = h.bool("stable")
+                    dead = h.bool("dead")
+                    moveTo(h.int("x"), h.int("y"))
+                    dodging = h.bool("dodging")
+                    marked = h.bool("marked")
+                }
+            }
+            require(party.isNotEmpty()) { "Save has no heroes" }
+            val g = Game(party, dice, fresh = false)
+
+            val dj = o.obj("dungeon")
+            val d = Dungeon(dj.int("width"), dj.int("height"))
+            val tiles = dj.str("tiles")
+            val explored = dj.str("explored")
+            require(tiles.length == d.width * d.height && explored.length == tiles.length) { "Corrupt map" }
+            for (i in tiles.indices) {
+                d[i % d.width, i / d.width] = Tile.entries.first { it.name.first() == tiles[i] }
+                d.explored[i] = explored[i] == '1'
+            }
+            dj.list("rooms").forEach { r ->
+                val v = (r as List<*>).map { (it as Number).toInt() }
+                d.rooms += Room(v[0], v[1], v[2], v[3])
+            }
+            dj.list("items").forEach { it ->
+                val v = it as List<*>
+                d.items += FloorItem((v[0] as Number).toInt(), (v[1] as Number).toInt(), ItemKind.valueOf(v[2] as String))
+            }
+            d.start = pt(dj.list("start"))
+            d.stairs = pt(dj.list("stairs"))
+            g.dungeon = d
+
+            o.objs("monsters").forEach { m ->
+                g.monsters += Monster(MonsterType.valueOf(m.str("type")), m.int("maxHp")).apply {
+                    hp = m.int("hp")
+                    moveTo(m.int("x"), m.int("y"))
+                    aware = m.bool("aware")
+                    surprised = m.bool("surprised")
+                    reactionAvailable = m.bool("reaction")
+                    dodging = m.bool("dodging")
+                    marked = m.bool("marked")
+                }
+            }
+
+            g.depth = o.int("depth")
+            g.phase = Phase.valueOf(o.str("phase"))
+            g.leaderIndex = o.int("leaderIndex").coerceIn(party.indices)
+            g.longRestUsed = o.bool("longRestUsed")
+            g.kills = o.int("kills")
+            g.stairsHintShown = o.bool("stairsHintShown")
+            o.list("trail").forEach { g.trail.addLast(pt(it)) }
+            o.list("corpses").forEach { g.corpses += pt(it) }
+            o.list("graves").forEach { g.graves += pt(it) }
+            o.list("log").forEach { e ->
+                val v = e as List<*>
+                g.log.addLast(LogEntry(v[1] as String, LogKind.valueOf(v[0] as String)))
+            }
+
+            val c = o.obj("combat")
+            val inits = c.ints("initiative")
+            c.list("turnOrder").forEachIndexed { i, r ->
+                val ref = r as String
+                val idx = ref.substring(1).toInt()
+                val creature: Creature = if (ref[0] == 'h') party[idx] else g.monsters[idx]
+                g.turnOrder += creature
+                g.initiativeRolls[creature] = inits.getOrElse(i) { 0 }
+            }
+            g.turnIndex = c.int("turnIndex")
+            g.round = c.int("round")
+            g.movementLeft = c.int("movementLeft")
+            g.actionAvailable = c.bool("action")
+            g.bonusActionAvailable = c.bool("bonus")
+            g.sneakAttackUsed = c.bool("sneakUsed")
+            g.aiming = c.bool("aiming")
+            g.disengaged = c.bool("disengaged")
+            g.movedThisTurn = c.bool("moved")
+            g.autoEndTurn = c.bool("autoEnd")
+            g.turnHolderRemoved = c.bool("holderRemoved")
+            g.monsterStepsLeft = c.int("monsterSteps")
+            g.monsterDone = c.bool("monsterDone")
+            require(!g.inCombat || g.turnOrder.isNotEmpty()) { "Corrupt combat state" }
+
+            g.updateFov()
+            g.log("Game loaded.", LogKind.INFO)
+            return g
+        }
+
+        /** Convenience wrappers for save files as text. */
+        fun fromJson(text: String, dice: Dice = Dice()): Game {
+            @Suppress("UNCHECKED_CAST")
+            val map = Json.parse(text) as? Map<String, Any?> ?: throw IllegalArgumentException("Not a save file")
+            return fromSave(map, dice)
+        }
+    }
+
+    fun toJson(): String = Json.write(toSave())
 
     // =======================================================================
     // Helpers
