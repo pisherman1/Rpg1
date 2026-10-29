@@ -19,6 +19,7 @@ object Weapons {
     val LIGHT_CROSSBOW = Weapon("Light Crossbow", d("1d8"), "piercing", ranged = true, range = 8)
     val SHORTSWORD = Weapon("Shortsword", d("1d6"), "piercing", finesse = true)
     val SHORTBOW = Weapon("Shortbow", d("1d6"), "piercing", ranged = true, range = 10)
+    val LONGBOW = Weapon("Longbow", d("1d8"), "piercing", ranged = true, range = 12)
     val QUARTERSTAFF = Weapon("Quarterstaff", d("1d6"), "bludgeoning")
     val MACE = Weapon("Mace", d("1d6"), "bludgeoning")
 }

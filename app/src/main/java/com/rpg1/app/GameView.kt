@@ -29,6 +29,7 @@ import com.rpg1.core.Phase
 import com.rpg1.core.Premades
 import com.rpg1.core.Race
 import com.rpg1.core.SpellTarget
+import com.rpg1.core.Subclass
 import com.rpg1.core.Tile
 import com.rpg1.core.art.Sprites
 import com.rpg1.core.formatModifier
@@ -113,7 +114,9 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     private var invHeroIndex = 0
     private var invSelectedItem: Item? = null
     private var invSelectedSlot: ItemSlot? = null
-    private var spellMenuFor: Hero? = null
+    /** Open action sub-menu ("Spells" or an action group) and the hero it belongs to. */
+    private var subMenu: String? = null
+    private var subMenuFor: Hero? = null
 
     /** Overlays that pause the game while open. */
     private val paused get() = menuOpen || levelUpHero != null || inventoryOpen
@@ -487,16 +490,28 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             }
         }
         val pulse = (0.5f + 0.5f * sin(nowMs / 180.0).toFloat())
-        val targeting = g.armedSpell != null || g.armedRanged
+        val feature = g.armedFeature
+        val targeting = g.armedSpell != null || g.armedRanged ||
+            feature == ActionId.CHALLENGE || feature == ActionId.HUNTERS_MARK || feature == ActionId.VOLLEY
+        if (feature == ActionId.RAISE_DEAD) {
+            g.activeHero?.let { h ->
+                for (p in g.corpses) if (d.isVisible(p.x, p.y) && maxOf(abs(p.x - h.x), abs(p.y - h.y)) <= 6) {
+                    outline(c, tileRect(p.x, p.y), 0xFF7CFF9A.toInt(), pulse)
+                }
+            }
+        }
         val active = g.activeHero
         for (m in g.monsters) {
             if (!d.isVisible(m.x, m.y)) continue
             val r = creatureRect(m)
             drawHpBar(c, r, m.hp, m.maxHp)
-            if (m === g.current) outline(c, r, 0xFFE04040.toInt(), pulse)
+            if (m === g.current) outline(c, r, if (m.ally) 0xFF7CFF9A.toInt() else 0xFFE04040.toInt(), pulse)
+            else if (m.ally) continue
             else if (targeting && active != null && inRangeOf(g, active, m)) outline(c, r, 0xFFFF7040.toInt(), pulse)
+            if (m.challenger != null) drawText(c, "⚔", r.left + tilePx * 0.15f, r.top + tilePx * 0.3f, tilePx * 0.28f, cGold, Paint.Align.CENTER)
+            if (m.huntedBy != null) drawText(c, "◎", r.right - tilePx * 0.15f, r.bottom - tilePx * 0.08f, tilePx * 0.28f, 0xFF8AE0FF.toInt(), Paint.Align.CENTER)
         }
-        val allyTargeting = g.armedPotion || g.armedSpell?.target == SpellTarget.ALLY
+        val allyTargeting = g.armedPotion || g.armedSpell?.target == SpellTarget.ALLY || g.armedFeature == ActionId.LAY_ON_HANDS
         for (h in g.livingHeroes) {
             val r = creatureRect(h)
             drawHpBar(c, r, h.hp, h.maxHp)
@@ -550,7 +565,11 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     }
 
     private fun inRangeOf(g: Game, h: Hero, m: Monster): Boolean {
-        val range = g.armedSpell?.range ?: h.charClass.rangedWeapon?.range ?: 1
+        val range = g.armedSpell?.range ?: when (g.armedFeature) {
+            ActionId.CHALLENGE -> 6
+            ActionId.HUNTERS_MARK -> 99
+            else -> h.rangedWeapon?.range ?: 1
+        }
         return h.distanceTo(m) <= range && g.dungeon.hasLineOfSight(h.x, h.y, m.x, m.y)
     }
 
@@ -690,7 +709,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             val lead = if (g.phase == Phase.EXPLORING && i == g.leaderIndex) "★ " else ""
             drawFitText(c, lead + hero.name, tx, r.top + rowH * 0.27f, rowH * 0.24f, r.right - tx - rowH * 0.5f,
                 if (hero.dead) cDim else cGold)
-            drawFitText(c, "L${hero.level} ${hero.race.displayName} ${hero.charClass.displayName}", tx, r.top + rowH * 0.48f,
+            drawFitText(c, "L${hero.level} ${hero.race.displayName} ${hero.subclass?.displayName ?: hero.charClass.displayName}", tx, r.top + rowH * 0.48f,
                 rowH * 0.17f, r.right - tx - rowH * 0.5f, cDim)
 
             val barTop = r.top + rowH * 0.56f
@@ -752,24 +771,32 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             y += ts * 1.6f
         }
 
-        // Action buttons; spells live in their own sub-menu.
+        // Action buttons; spells and grouped moves live in sub-menus.
         val actions = g.availableActions()
         val active = g.activeHero
-        if (spellMenuFor != null && spellMenuFor !== active) spellMenuFor = null
+        if (subMenuFor !== active) subMenu = null
         val spells = actions.filter { it.id == ActionId.SPELL }
-        val showSpells = spellMenuFor != null && spells.isNotEmpty()
+        val groups = actions.mapNotNull { it.group }.distinct()
         val cols = 2
-        val bh = h * 0.075f
-        val bw = (w - pad * 3) / cols
         class Btn(val label: String, val enabled: Boolean, val active: Boolean, val onTap: () -> Unit)
         val buttons = mutableListOf<Btn>()
-        if (showSpells) {
-            buttons += Btn("◀ Back", true, false) { spellMenuFor = null }
+        fun close() {
+            subMenu = null
+        }
+        val open = subMenu
+        if (open == SPELLS && spells.isNotEmpty()) {
+            buttons += Btn("◀ Back", true, false, ::close)
             val slots = active?.spellSlots?.takeIf { it.isNotEmpty() }?.joinToString("/") ?: "-"
             buttons += Btn("Slots $slots", false, false) {}
             for (a in spells) buttons += Btn(a.label, a.enabled, a.active) {
                 g.perform(a)
-                spellMenuFor = null
+                close()
+            }
+        } else if (open != null && open in groups) {
+            buttons += Btn("◀ Back", true, false, ::close)
+            for (a in actions.filter { it.group == open }) buttons += Btn(a.label, a.enabled, a.active) {
+                g.perform(a)
+                close()
             }
         } else {
             val first = actions.takeWhile { it.id == ActionId.END_TURN || it.id == ActionId.DESCEND }
@@ -777,13 +804,26 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             if (spells.isNotEmpty()) {
                 val armed = spells.any { it.active }
                 buttons += Btn(if (armed) "Spells ✦" else "Spells ▸", spells.any { it.enabled } || armed, armed) {
-                    spellMenuFor = active
+                    subMenu = SPELLS
+                    subMenuFor = active
                 }
             }
-            actions.drop(first.size).filter { it.id != ActionId.SPELL }.forEach { a ->
+            actions.drop(first.size).filter { it.id != ActionId.SPELL && it.group == null }.forEach { a ->
                 buttons += Btn(a.label, a.enabled, a.active) { g.perform(a) }
             }
+            for (group in groups) {
+                val items = actions.filter { it.group == group }
+                val on = items.any { it.active }
+                buttons += Btn("$group ▸", items.any { it.enabled } || on, on) {
+                    subMenu = group
+                    subMenuFor = active
+                }
+            }
         }
+        // Shrink buttons if there are more than fit.
+        val rows = (buttons.size + cols - 1) / cols
+        val bh = minOf(h * 0.075f, (h - y - pad) / maxOf(1, rows) - pad)
+        val bw = (w - pad * 3) / cols
         buttons.forEachIndexed { i, b ->
             val bx = left + pad + (i % cols) * (bw + pad)
             val by = y + (i / cols) * (bh + pad)
@@ -812,7 +852,8 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         var y = r.top + pad + h * 0.05f
         drawText(c, hero.name, tx, y, h * 0.06f, cGold)
         y += h * 0.05f
-        drawText(c, "Level ${hero.level} ${hero.race.displayName} ${hero.charClass.displayName}", tx, y, h * 0.035f, cText)
+        drawText(c, "Level ${hero.level} ${hero.race.displayName} ${hero.charClass.displayName}" +
+            (hero.subclass?.let { " · ${it.displayName}" } ?: ""), tx, y, h * 0.035f, cText)
         y += h * 0.045f
         val next = hero.xpForNextLevel?.let { " / $it" } ?: " (max)"
         drawText(c, "XP ${hero.xp}$next   Proficiency +${hero.proficiency}", tx, y, h * 0.03f, cDim)
@@ -839,7 +880,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         drawFitText(c, "${melee.name}$bonusText: ${formatModifier(hero.attackBonus(melee))} to hit, ${melee.damage}${formatModifier(hero.damageBonus(melee))} ${melee.damageType}",
             r.left + pad, y, ls, width)
         y += lh
-        hero.charClass.rangedWeapon?.let { rw ->
+        hero.rangedWeapon?.let { rw ->
             drawFitText(c, "${rw.name}: ${formatModifier(hero.attackBonus(rw))} to hit, ${rw.damage}${formatModifier(hero.damageBonus(rw))}, range ${rw.range * 5} ft",
                 r.left + pad, y, ls, width)
             y += lh
@@ -859,6 +900,12 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         y += lh * 0.9f
         drawFitText(c, "Features: ${hero.charClass.features}", r.left + pad, y, ls * 0.9f, width, cDim)
         y += lh * 0.9f
+        hero.subclass?.let { sub ->
+            val unlocked = sub.features.filter { hero.level >= it.level }.joinToString(", ") { it.title }
+            val next = sub.features.firstOrNull { hero.level < it.level }?.let { "  (next: ${it.title} at ${it.level})" } ?: ""
+            drawFitText(c, "${sub.displayName}: $unlocked$next", r.left + pad, y, ls * 0.9f, width, cGold)
+            y += lh * 0.9f
+        }
         drawFitText(c, "Race: ${hero.race.trait}", r.left + pad, y, ls * 0.9f, width, cDim)
         y += lh * 0.9f
         drawFitText(c, "Armor: ${hero.charClass.armor.name}" + if (hero.armorBonus > 0) " +${hero.armorBonus}" else "",
@@ -989,7 +1036,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         val pad = h * 0.025f
         val s = h * 0.13f
         heroSprite(c, hero, r.left + pad, r.top + pad, s)
-        drawText(c, "▲ ${hero.name} · Level ${hero.level} ${hero.charClass.displayName}", r.left + pad * 2 + s, r.top + pad + s * 0.45f,
+        drawText(c, "▲ ${hero.name} · Level ${hero.level} ${hero.subclass?.displayName ?: hero.charClass.displayName}", r.left + pad * 2 + s, r.top + pad + s * 0.45f,
             h * 0.05f, cGold)
         drawText(c, "HP ${hero.maxHp}  ·  Proficiency +${hero.proficiency}" +
             if (hero.charClass.isCaster) "  ·  Spell slots ${hero.maxSpellSlots.joinToString("/")}" else "",
@@ -997,6 +1044,12 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
         val top = r.top + pad * 2 + s
         val bottom = r.bottom - pad * 2 - h * 0.09f
+        if (hero.needsSubclass) {
+            drawSubclassChoice(c, hero, RectF(r.left + pad, top, r.right - pad, bottom))
+            val bw = w * 0.2f
+            button(c, RectF(r.right - pad - bw, r.bottom - pad - h * 0.09f, r.right - pad, r.bottom - pad), "Later") { levelUpHero = null }
+            return
+        }
         val both = hero.pendingAbilityPoints > 0 && hero.pendingSpells > 0
         val split = if (both) r.left + r.width() * 0.45f else r.right
         if (hero.pendingAbilityPoints > 0) drawAsi(c, hero, RectF(r.left + pad, top, split - pad, bottom))
@@ -1166,5 +1219,44 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         }
         val close = RectF(r.right - pad - w * 0.12f, r.top + pad, r.right - pad, r.top + pad + h * 0.065f)
         button(c, close, "Close") { inventoryOpen = false }
+    }
+
+    private fun drawSubclassChoice(c: Canvas, hero: Hero, area: RectF) {
+        val h = height.toFloat()
+        drawText(c, "Choose a path for ${hero.name}", area.left, area.top + h * 0.04f, h * 0.04f, cGold)
+        val options = Subclass.forClass(hero.charClass)
+        val gap = h * 0.025f
+        val cardW = (area.width() - gap * (options.size - 1)) / options.size
+        val top = area.top + h * 0.07f
+        options.forEachIndexed { i, sub ->
+            val card = RectF(area.left + i * (cardW + gap), top, area.left + i * (cardW + gap) + cardW, area.bottom)
+            box(c, card, cPanelLight, 0xFF4E4266.toInt(), 3f)
+            val p = h * 0.02f
+            var y = card.top + h * 0.055f
+            drawText(c, sub.displayName, card.left + p, y, h * 0.045f, cGold)
+            y += h * 0.015f
+            val ls = h * 0.024f
+            for (line in wrap(sub.lore, ls, card.width() - p * 2)) {
+                y += ls * 1.25f
+                drawText(c, line, card.left + p, y, ls, cDim)
+            }
+            y += ls * 0.8f
+            for (f in sub.features) {
+                y += ls * 1.35f
+                if (y > card.bottom - h * 0.12f) break
+                drawText(c, "${f.title} (lvl ${f.level})", card.left + p, y, ls * 1.05f, if (hero.level >= f.level) cText else cDim)
+                for (line in wrap(f.text, ls * 0.92f, card.width() - p * 3).take(3)) {
+                    y += ls * 1.15f
+                    if (y > card.bottom - h * 0.12f) break
+                    drawText(c, line, card.left + p * 2, y, ls * 0.92f, cDim)
+                }
+            }
+            val b = RectF(card.left + p, card.bottom - p - h * 0.08f, card.right - p, card.bottom - p)
+            button(c, b, "Become a ${sub.displayName}", active = true) { hero.chooseSubclass(sub) }
+        }
+    }
+
+    companion object {
+        private const val SPELLS = "Spells"
     }
 }

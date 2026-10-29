@@ -68,6 +68,15 @@ that hero's character sheet.
     Shatter, Fireball.
   - Cleric: Sacred Flame, Toll the Dead, Guiding Bolt, Cure Wounds, Healing Word (bonus action),
     Bless, Prayer of Healing, Mass Healing Word, Revivify (300 gold, brings back a fallen hero).
+- Subclasses at 3rd level (adapted from D&D lore to the tactical grid):
+  - Fighter: **Paladin** (Divine Smite, Lay on Hands, Aura of Protection) or **Knight**
+    (Shield Wall, Knightly Challenge, Rallying Cry, Warding Maneuver).
+  - Rogue: **Assassin** (Assassinate, Envenom, Death Strike) or **Ranger** (longbow and
+    Archery, Hunter's Mark, Volley).
+  - Wizard: **Necromancer** (Grim Harvest, Raise Dead skeleton minions, Undead Thralls) or
+    **Mage** (Arcane Recovery, Arcane Potency, Overchannel).
+  - Cleric: **Priest** (Disciple of Life, Preserve Life, Blessed Healer, Bless/Revivify) or
+    **Tempest** (Wrath of the Storm, Destructive Wrath, Thunderwave/Call Lightning, Divine Strike).
 - Ability score improvements (+2 / +1+1, max 20); CON raises max HP for every level.
 - Magic items (SRD): +1/+2/+3 weapons, armor and Wands of the War Mage, Ring and Cloak of
   Protection, Amulet of Health, Gauntlets of Ogre Power, Headband of Intellect, Periapt of

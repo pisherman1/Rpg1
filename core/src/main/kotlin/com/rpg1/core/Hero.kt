@@ -48,7 +48,63 @@ class Hero(
         private set
     var pendingSpells = 0
         private set
-    val hasPendingChoices get() = pendingAbilityPoints > 0 || pendingSpells > 0
+    val hasPendingChoices get() = pendingAbilityPoints > 0 || pendingSpells > 0 || needsSubclass
+
+    // --- Subclass ------------------------------------------------------------
+
+    var subclass: Subclass? = null
+        private set
+    val needsSubclass get() = level >= SUBCLASS_LEVEL && subclass == null
+
+    fun has(feature: Feature) = subclass == feature.subclass && level >= feature.level
+
+    /** Remaining uses of limited features; absent means full. */
+    private val resourcesUsed: MutableMap<Resource, Int> = EnumMap(Resource::class.java)
+
+    fun maxUses(r: Resource): Int = when (r) {
+        Resource.SMITE -> if (has(Feature.DIVINE_SMITE)) (if (level >= 7) 3 else 2) else 0
+        Resource.LAY_ON_HANDS -> if (has(Feature.LAY_ON_HANDS)) 5 * level else 0
+        Resource.ENVENOM -> if (has(Feature.ENVENOM)) 2 else 0
+        Resource.PRESERVE_LIFE -> if (has(Feature.PRESERVE_LIFE)) 1 else 0
+        Resource.DESTRUCTIVE_WRATH -> if (has(Feature.DESTRUCTIVE_WRATH)) 1 else 0
+        Resource.WRATH_OF_THE_STORM -> if (has(Feature.WRATH_OF_THE_STORM)) maxOf(1, abilities.mod(Ability.WIS)) else 0
+        Resource.OVERCHANNEL -> if (has(Feature.OVERCHANNEL)) 1 else 0
+        Resource.ARCANE_RECOVERY -> if (has(Feature.ARCANE_RECOVERY)) 1 else 0
+    }
+
+    fun uses(r: Resource) = (maxUses(r) - (resourcesUsed[r] ?: 0)).coerceAtLeast(0)
+
+    fun spend(r: Resource, amount: Int = 1): Boolean {
+        if (uses(r) < amount) return false
+        resourcesUsed[r] = (resourcesUsed[r] ?: 0) + amount
+        return true
+    }
+
+    /** Readied abilities that trigger on the next suitable hit or spell. */
+    var smiteReady = false
+    var envenomed = false
+    var wrathReady = false
+    var overchannelReady = false
+
+    fun chooseSubclass(choice: Subclass): Boolean {
+        if (!needsSubclass || choice.charClass != charClass) return false
+        subclass = choice
+        grantSubclassSpells()
+        return true
+    }
+
+    /** Domain spells that come with a subclass, known for free. */
+    private fun grantSubclassSpells() {
+        val grants = when (subclass) {
+            Subclass.PRIEST -> listOf(Spell.BLESS to 3, Spell.REVIVIFY to 5)
+            Subclass.TEMPEST -> listOf(Spell.THUNDERWAVE to 3, Spell.CALL_LIGHTNING to 5)
+            else -> emptyList()
+        }
+        for ((spell, lvl) in grants) if (level >= lvl && spell !in knownSpells) knownSpells += spell
+    }
+
+    /** The bow (or crossbow) this hero shoots with; rangers upgrade to a longbow. */
+    val rangedWeapon: Weapon? get() = if (has(Feature.ARCHERY)) Weapons.LONGBOW else charClass.rangedWeapon
 
     var potions = 2
     var gold = 0
@@ -93,7 +149,8 @@ class Hero(
 
     override val speed get() = race.speed + if (has(ItemType.BOOTS_OF_STRIDING)) 1 else 0
 
-    override val armorClass get() = charClass.armor.armorClass(abilities.mod(Ability.DEX)) + armorBonus + protection
+    override val armorClass get() = charClass.armor.armorClass(abilities.mod(Ability.DEX)) + armorBonus + protection +
+        if (has(Feature.SHIELD_WALL)) 1 else 0
 
     val lucky get() = race == Race.HALFLING
 
@@ -106,7 +163,8 @@ class Hero(
         else -> Ability.STR
     }
 
-    fun attackBonus(weapon: Weapon) = abilities.mod(abilityFor(weapon)) + proficiency + weaponBonus
+    fun attackBonus(weapon: Weapon) = abilities.mod(abilityFor(weapon)) + proficiency + weaponBonus +
+        if (weapon.ranged && has(Feature.ARCHERY)) 2 else 0
 
     fun damageBonus(weapon: Weapon) = abilities.mod(abilityFor(weapon)) + weaponBonus
 
@@ -138,7 +196,14 @@ class Hero(
 
     fun canCast(spell: Spell) = spell in knownSpells && (spell.isCantrip || lowestAvailableSlot(spell.level) != null)
 
-    fun spendSlot(slotLevel: Int) {
+    /** Restores one spent slot of [slotLevel]; false if none are spent. */
+    fun recoverSlot(slotLevel: Int): Boolean {
+        if (slotLevel !in 1..spellSlots.size || spellSlots[slotLevel - 1] >= maxSpellSlots[slotLevel - 1]) return false
+        spellSlots[slotLevel - 1]++
+        return true
+    }
+
+        fun spendSlot(slotLevel: Int) {
         check(spellSlots[slotLevel - 1] > 0)
         spellSlots[slotLevel - 1]--
     }
@@ -147,7 +212,10 @@ class Hero(
 
     /** Spells the hero could learn right now. */
     fun learnableSpells(): List<Spell> =
-        charClass.spellList.filter { it !in knownSpells && it.level <= maxSpellLevel }
+        charClass.spellList.filter { it !in knownSpells && it.level <= maxSpellLevel && it !in subclassOnlySpells }
+
+    /** Spells granted by a subclass are never offered as normal picks. */
+    private val subclassOnlySpells get() = if (charClass == CharClass.CLERIC) setOf(Spell.THUNDERWAVE, Spell.CALL_LIGHTNING) else emptySet()
 
     fun learnSpell(spell: Spell): Boolean {
         if (pendingSpells <= 0 || spell !in learnableSpells()) return false
@@ -217,6 +285,9 @@ class Hero(
                 pendingSpells++
                 news += "a new spell"
             }
+            if (level == SUBCLASS_LEVEL) news += "choose a subclass"
+            grantSubclassSpells()
+            subclass?.features?.filter { it.level == level }?.forEach { news += it.title }
             if (level == 5 && charClass == CharClass.FIGHTER) news += "Extra Attack"
             if (level == 5 && charClass == CharClass.ROGUE) news += "Uncanny Dodge"
             if (level == 2 && charClass == CharClass.FIGHTER) news += "Action Surge"
@@ -248,6 +319,7 @@ class Hero(
     }
 
     fun longRest() {
+        resourcesUsed.clear()
         hp = maxHp
         hitDice = minOf(level, hitDice + maxOf(1, level / 2))
         spellSlots = maxSpellSlots.copyOf()
@@ -268,6 +340,7 @@ class Hero(
         }
         secondWindAvailable = true
         actionSurgeAvailable = true
+        resourcesUsed.keys.removeAll { it.shortRest }
         return healed
     }
 
@@ -280,6 +353,9 @@ class Hero(
         "hitDice" to hitDice, "slots" to spellSlots, "maxSlots" to maxSpellSlots,
         "spells" to knownSpells.map { it.name },
         "pendingAbilityPoints" to pendingAbilityPoints, "pendingSpells" to pendingSpells,
+        "subclass" to subclass?.name,
+        "resourcesUsed" to resourcesUsed.mapKeys { it.key.name },
+        "readied" to listOf(smiteReady, envenomed, wrathReady, overchannelReady),
         "equipment" to equipment.values.map { it.toSave() },
         "potions" to potions, "gold" to gold,
         "secondWind" to secondWindAvailable, "actionSurge" to actionSurgeAvailable,
@@ -293,6 +369,7 @@ class Hero(
         const val MAX_LEVEL = 10
         val XP_TABLE = intArrayOf(0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000)
         val ASI_LEVELS = setOf(4, 8)
+        const val SUBCLASS_LEVEL = 3
 
         /** Rolled scores are assigned to abilities by class priority, then racial bonuses applied. */
         fun create(name: String, race: Race, charClass: CharClass, rolled: List<Int>): Hero =
@@ -318,6 +395,13 @@ class Hero(
                 h.list("equipment").forEach { hero.equipment[Item.fromSave(it).slot] = Item.fromSave(it) }
                 hero.reactionAvailable = h.bool("reaction")
                 hero.blessed = h.bool("blessed")
+                h.strOrNull("subclass")?.let { hero.subclass = Subclass.valueOf(it) }
+                if (h.has("resourcesUsed")) h.obj("resourcesUsed").map.forEach { (k, v) ->
+                    hero.resourcesUsed[Resource.valueOf(k)] = (v as Number).toInt()
+                }
+                if (h.has("readied")) h.list("readied").map { it as Boolean }.let {
+                    hero.smiteReady = it[0]; hero.envenomed = it[1]; hero.wrathReady = it[2]; hero.overchannelReady = it[3]
+                }
             } else {
                 h.int("weaponBonus").takeIf { it > 0 }?.let { hero.equipment[ItemSlot.WEAPON] = Item(ItemType.MAGIC_WEAPON, it) }
                 h.int("armorBonus").takeIf { it > 0 }?.let { hero.equipment[ItemSlot.ARMOR] = Item(ItemType.MAGIC_ARMOR, it) }

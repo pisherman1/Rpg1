@@ -87,12 +87,12 @@ enum class MonsterType(
     val isUndead get() = this == SKELETON || this == ZOMBIE || this == GHOUL
 }
 
-class Monster(val type: MonsterType, override val maxHp: Int) : Creature(type.displayName) {
+class Monster(val type: MonsterType, val baseMaxHp: Int) : Creature(type.displayName) {
     /** A fresh monster with hit points rolled from its hit dice. */
     constructor(type: MonsterType, dice: Dice) : this(type, maxOf(1, dice.roll(type.hitDice)))
 
     override val abilities = AbilityScores.of(*type.scores)
-    override var hp: Int = maxHp
+    override var hp: Int = baseMaxHp
     override val armorClass get() = type.armorClass
     override val speed get() = type.speed
 
@@ -103,6 +103,20 @@ class Monster(val type: MonsterType, override val maxHp: Int) : Creature(type.di
     var reactionAvailable = true
     /** Sleep spell: loses its turns until damaged; attacks against it have advantage. */
     var asleep = false
+    /** Fights for the party (a necromancer's skeleton), raised by [master]. */
+    var ally = false
+    var master: Hero? = null
+    /** Has taken a turn in the current fight (for Assassinate). */
+    var acted = false
+    /** Knight who challenged this monster, and ranger who marked it. */
+    var challenger: Hero? = null
+    var huntedBy: Hero? = null
+    /** Extra damage on its attacks (Undead Thralls). */
+    var bonusDamage = 0
+
+    override val maxHp: Int get() = baseMaxHp + extraHp
+    /** Extra hit points granted after creation (Undead Thralls). */
+    var extraHp = 0
 
     val isDead get() = hp <= 0
 

@@ -34,7 +34,7 @@ enum class CharClass(
         "Wizard", 6, listOf(INT, CON, DEX, WIS, CHA, STR), setOf(INT, WIS),
         Weapons.QUARTERSTAFF, null, Armors.MAGE_ARMOR,
         INT, listOf(Spell.FIRE_BOLT, Spell.MAGIC_MISSILE, Spell.BURNING_HANDS),
-        listOf(Spell.FIRE_BOLT, Spell.RAY_OF_FROST, Spell.MAGIC_MISSILE, Spell.BURNING_HANDS, Spell.SLEEP,
+        listOf(Spell.FIRE_BOLT, Spell.RAY_OF_FROST, Spell.MAGIC_MISSILE, Spell.BURNING_HANDS, Spell.THUNDERWAVE, Spell.SLEEP,
             Spell.SCORCHING_RAY, Spell.SHATTER, Spell.FIREBALL),
         "Arcane spells; learns a new spell every level",
     ),

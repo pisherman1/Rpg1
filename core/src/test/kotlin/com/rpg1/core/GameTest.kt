@@ -33,6 +33,7 @@ object Bot {
     /** Spends level-up choices and equips loot the simple way. */
     fun manageParty(game: Game) {
         for (h in game.livingHeroes) {
+            if (h.needsSubclass) h.chooseSubclass(Subclass.forClass(h.charClass)[game.party.indexOf(h) % 2])
             while (h.pendingAbilityPoints > 0) {
                 val a = h.charClass.abilityPriority.firstOrNull { h.baseAbilities[it] < 20 } ?: break
                 if (!h.improveAbilities(mapOf(a to 1))) break
@@ -54,7 +55,7 @@ object Bot {
         manageParty(game)
         val hero = game.activeHero ?: return
         val actions = game.availableActions()
-        fun act(id: ActionId, spell: Spell? = null) =
+        fun act(id: ActionId, spell: Spell?): Boolean =
             actions.firstOrNull { it.id == id && it.enabled && (spell == null || it.spell == spell) }
                 ?.let { game.perform(it); true } ?: false
 
@@ -62,10 +63,10 @@ object Bot {
             Phase.EXPLORING -> {
                 val hurt = game.livingHeroes.filter { it.hp < it.maxHp / 2 }
                 if (hurt.isNotEmpty()) {
-                    if (act(ActionId.SHORT_REST) && game.livingHeroes.none { it.hp < it.maxHp / 2 }) return
-                    if (act(ActionId.LONG_REST)) return
+                    if (act(ActionId.SHORT_REST, null) && game.livingHeroes.none { it.hp < it.maxHp / 2 }) return
+                    if (act(ActionId.LONG_REST, null)) return
                 }
-                if (act(ActionId.DESCEND)) return
+                if (act(ActionId.DESCEND, null)) return
                 val goal = nearestFrontier(game) ?: game.dungeon.stairs
                 game.tap(goal.x, goal.y)
             }
@@ -74,22 +75,23 @@ object Bot {
                 // Help a dying ally first if one is in reach.
                 val dying = game.livingHeroes.firstOrNull { it.isUnconscious && it.distanceTo(hero) <= 1 }
                 if (dying != null && game.actionAvailable) {
-                    if (act(ActionId.SPELL, Spell.CURE_WOUNDS) || act(ActionId.POTION)) {
+                    if (act(ActionId.SPELL, Spell.CURE_WOUNDS) || act(ActionId.POTION, null)) {
                         game.selectHero(game.party.indexOf(dying))
                         if (!game.actionAvailable) return
                     }
                 }
                 if (hero.hp <= hero.maxHp / 3) {
-                    if (act(ActionId.SECOND_WIND)) return
-                    if (act(ActionId.SPELL, Spell.CURE_WOUNDS) || act(ActionId.POTION)) {
+                    if (act(ActionId.SECOND_WIND, null)) return
+                    if (act(ActionId.SPELL, Spell.CURE_WOUNDS) || act(ActionId.POTION, null)) {
                         game.selectHero(game.party.indexOf(hero))
                         if (!game.actionAvailable) return
                     }
                 }
-                val target = game.monsters.filter { game.dungeon.isVisible(it.x, it.y) }.minByOrNull { it.distanceTo(hero) }
-                    ?: game.monsters.minByOrNull { it.distanceTo(hero) }
+                val target = game.monsters.filter { !it.ally && game.dungeon.isVisible(it.x, it.y) }.minByOrNull { it.distanceTo(hero) }
+                    ?: game.monsters.filter { !it.ally }.minByOrNull { it.distanceTo(hero) }
+                if (target != null) useFeatures(game, hero, target, ::act)
                 if (target == null) {
-                    act(ActionId.END_TURN)
+                    act(ActionId.END_TURN, null)
                     return
                 }
                 if (game.actionAvailable) {
@@ -104,7 +106,7 @@ object Bot {
                     }
                     game.tap(target.x, target.y)
                     if (game.isBusy) return
-                    if (act(ActionId.ACTION_SURGE)) {
+                    if (act(ActionId.ACTION_SURGE, null)) {
                         game.tap(target.x, target.y)
                         return
                     }
@@ -113,9 +115,38 @@ object Bot {
                     game.tap(target.x, target.y)
                     if (game.isBusy || before != (hero.x to hero.y)) return
                 }
-                if (!game.isBusy) act(ActionId.END_TURN)
+                if (!game.isBusy) act(ActionId.END_TURN, null)
             }
             else -> {}
+        }
+    }
+
+    /** Exercises subclass features when they're available. */
+    private fun useFeatures(game: Game, hero: Hero, target: Monster, act: (ActionId, Spell?) -> Boolean) {
+        val ids = game.availableActions().filter { it.enabled }.map { it.id }.toSet()
+        if (ActionId.SMITE in ids && !hero.smiteReady) act(ActionId.SMITE, null)
+        if (ActionId.DESTRUCTIVE_WRATH in ids && !hero.wrathReady) act(ActionId.DESTRUCTIVE_WRATH, null)
+        if (ActionId.OVERCHANNEL in ids && !hero.overchannelReady) act(ActionId.OVERCHANNEL, null)
+        if (ActionId.ENVENOM in ids) act(ActionId.ENVENOM, null)
+        if (ActionId.CHALLENGE in ids && target.challenger == null && game.dungeon.isVisible(target.x, target.y) && hero.distanceTo(target) <= 6) {
+            act(ActionId.CHALLENGE, null)
+            game.tap(target.x, target.y)
+        }
+        if (ActionId.HUNTERS_MARK in ids && target.huntedBy !== hero && game.dungeon.isVisible(target.x, target.y)) {
+            act(ActionId.HUNTERS_MARK, null)
+            game.tap(target.x, target.y)
+        }
+        if (ActionId.PRESERVE_LIFE in ids && game.livingHeroes.count { it.hp < it.maxHp / 2 } >= 2) act(ActionId.PRESERVE_LIFE, null)
+        if (ActionId.RAISE_DEAD in ids) {
+            val corpse = game.corpses.firstOrNull { game.dungeon.isVisible(it.x, it.y) && chebyshev(it.x, it.y, hero.x, hero.y) <= 6 && !game.isOccupied(it.x, it.y) }
+            if (corpse != null) {
+                act(ActionId.RAISE_DEAD, null)
+                game.tap(corpse.x, corpse.y)
+            }
+        }
+        if (ActionId.VOLLEY in ids && game.monsters.count { !it.ally && chebyshev(it.x, it.y, target.x, target.y) <= 1 } >= 2) {
+            act(ActionId.VOLLEY, null)
+            game.tap(target.x, target.y)
         }
     }
 
@@ -130,7 +161,7 @@ object Bot {
             if (!frontier && d.itemAt(x, y) == null) continue
             val dist = chebyshev(x, y, h.x, h.y)
             if (dist in 1 until bestDist &&
-                d.findPath(h.x, h.y, x, y, { px, py -> game.monsterAt(px, py) != null || !d.isExplored(px, py) }) != null
+                d.findPath(h.x, h.y, x, y, { px, py -> game.enemyAt(px, py) != null || !d.isExplored(px, py) }) != null
             ) {
                 best = Point(x, y)
                 bestDist = dist

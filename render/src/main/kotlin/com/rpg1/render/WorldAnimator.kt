@@ -159,6 +159,8 @@ class WorldAnimator(private val atlas: Atlas) {
                 FxKind.FIRE -> repeat(2) { particles.ember(x, y) }
                 FxKind.RADIANT -> if (rng.nextFloat() < 0.6f) particles.motes(x, y, 0xFFF0A0, 1, 2f)
                 FxKind.FORCE -> if (rng.nextFloat() < 0.7f) particles.burst(x, y, 0xB070FF, 1, 12f, 0f, 0.3f)
+                FxKind.LIGHTNING -> particles.burst(x, y, 0xB8ECFF, 2, 30f, 0f, 0.15f)
+                FxKind.NECROTIC -> if (rng.nextFloat() < 0.8f) particles.motes(x, y, 0x7CFF9A, 1, 3f)
                 else -> {}
             }
             if (p.t >= PROJECTILE_TIME) {
@@ -411,7 +413,11 @@ class WorldAnimator(private val atlas: Atlas) {
                 }
                 is Monster -> {
                     val bob = if (a?.moving == true) 0f else if (sin(time * 2.6f + c.x * 1.3f + c.y) > 0.5f) -1f else 0f
-                    sprite(sprites, atlas.id(Atlas.monsterKey(c.type)), x + lx, y + ly + bob, flash = flash)
+                    // The party's undead minions glow a ghostly green.
+                    val tint = if (c.ally) floatArrayOf(0.7f, 1f, 0.8f) else floatArrayOf(1f, 1f, 1f)
+                    sprite(sprites, atlas.id(Atlas.monsterKey(c.type)), x + lx, y + ly + bob, flash = flash,
+                        r = tint[0], g = tint[1], b = tint[2])
+                    if (c.ally) light(x + 8, y + 8, 26f, 0x60FF90, 0.6f)
                     if (c.marked) {
                         light(x + 8, y + 8, 24f, 0xFFE070, 0.8f)
                         if (rng.nextFloat() < 0.15f) particles.motes(x + 8, y + 8, 0xFFF0A0, 1, 5f)
@@ -478,6 +484,8 @@ class WorldAnimator(private val atlas: Atlas) {
             FxKind.MISS -> 0xB0B0C0
             FxKind.INFO -> 0xFFD040
             FxKind.LOOT -> 0xC080FF
+            FxKind.LIGHTNING -> 0x8AD8FF
+            FxKind.NECROTIC -> 0x7CFF9A
         }
 
         /** Stable per-square pseudo-random number for decoration choices. */

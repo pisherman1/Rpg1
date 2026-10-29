@@ -42,6 +42,9 @@ enum class Spell(
     BURNING_HANDS("Burning Hands", 1, SpellTarget.ADJACENT_AREA, 1, d("3d6"), "fire",
         "Adjacent foes: DEX save or 3d6 fire, half on a save. +1d6 per higher slot.",
         Ability.DEX, upcastDice = 1, shortName = "Burn Hands"),
+    THUNDERWAVE("Thunderwave", 1, SpellTarget.ADJACENT_AREA, 1, d("2d8"), "thunder",
+        "Adjacent foes: CON save or 2d8 thunder, half on a save. +1d8 per higher slot.",
+        Ability.CON, upcastDice = 1, shortName = "Thunderwave"),
     SLEEP("Sleep", 1, SpellTarget.ENEMY_AREA, 10, d("5d8"), "sleep",
         "5d8 HP worth of foes near the target fall asleep, weakest first. +2d8 per higher slot.",
         upcastDice = 2, radius = 2),
@@ -53,6 +56,10 @@ enum class Spell(
     FIREBALL("Fireball", 3, SpellTarget.ENEMY_AREA, 12, d("8d6"), "fire",
         "Foes within 10 ft of the target: DEX save or 8d6 fire, half on a save. +1d6 per higher slot.",
         Ability.DEX, upcastDice = 1, radius = 2),
+
+    CALL_LIGHTNING("Call Lightning", 3, SpellTarget.ENEMY_AREA, 12, d("3d10"), "lightning",
+        "A bolt strikes the target: foes within 5 ft make a DEX save or take 3d10 lightning, half on a save. +1d10 per higher slot.",
+        Ability.DEX, upcastDice = 1, radius = 1, shortName = "Call Light."),
 
     // --- Cleric -------------------------------------------------------------
     SACRED_FLAME("Sacred Flame", 0, SpellTarget.ENEMY, 8, d("1d8"), "radiant",
