@@ -82,7 +82,7 @@ object GameAudio {
                 musicReady = true
                 main.post { applyMusic() }
             } catch (t: Throwable) {
-                Log.e("D20", "Audio setup failed", t)
+                Log.e("DungeonDelver", "Audio setup failed", t)
             }
         }
     }
@@ -149,7 +149,7 @@ object GameAudio {
             player = mp
             fade(mp, 0f, MUSIC_VOLUME) {}
         } catch (t: Throwable) {
-            Log.e("D20", "Couldn't play $target", t)
+            Log.e("DungeonDelver", "Couldn't play $target", t)
         }
     }
 

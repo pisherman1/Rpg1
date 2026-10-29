@@ -1,11 +1,11 @@
-# D20 Dungeon
+# Dungeon Delver
 
 A pixel-art dungeon crawler for Android, played with a party of four using D&D 5e-style rules.
 
 ## Getting the APK
 
 Every push runs the **Build APK** GitHub Actions workflow. Open the latest run under
-**Actions**, download the `d20-dungeon-apk` artifact, unzip it and install `app-debug.apk`
+**Actions**, download the `dungeon-delver-apk` artifact, unzip it and install `app-debug.apk`
 on your phone (you'll need to allow installing from unknown sources).
 Builds are signed with the debug key in `app/debug.keystore`, so each new build installs over
 the previous one and keeps your saves.

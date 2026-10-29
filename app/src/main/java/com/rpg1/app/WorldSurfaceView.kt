@@ -37,7 +37,7 @@ class WorldSurfaceView(context: Context, private val onFailure: (Throwable) -> U
     }
 
     private fun fail(t: Throwable) {
-        Log.e("D20", "World renderer failed; falling back to Canvas", t)
+        Log.e("DungeonDelver", "World renderer failed; falling back to Canvas", t)
         failed = true
         renderer = null
         post { onFailure(t) }

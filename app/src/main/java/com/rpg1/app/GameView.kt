@@ -368,7 +368,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         val h = height.toFloat()
         val builder = GameSession.builder
         val pad = h * 0.025f
-        drawText(c, "D20 DUNGEON", w / 2, h * 0.09f, h * 0.07f, cGold, Paint.Align.CENTER)
+        drawText(c, "DUNGEON DELVER", w / 2, h * 0.09f, h * 0.07f, cGold, Paint.Align.CENTER)
         drawText(c, "Assemble your party of four", w / 2, h * 0.14f, h * 0.035f, cDim, Paint.Align.CENTER)
 
         val cardTop = h * 0.17f
