@@ -41,6 +41,9 @@ object HeroArt {
                     set(4, 11, 0xFFF2C641.toInt()); set(11, 11, 0xFFF2C641.toInt())
                 }
             }
+            Race.THERIAN -> Sprites.FOX.rows.forEachIndexed { y, row ->
+                row.forEachIndexed { x, ch -> if (ch != '.') set(x, y, Palette.colors.getValue(ch)) }
+            }
             Race.ELF -> {
                 set(3, 4, outline); set(12, 4, outline)
                 set(3, 5, skin); set(12, 5, skin)
@@ -54,7 +57,7 @@ object HeroArt {
     /** Halflings (and dwarves, a little) are drawn shorter. */
     fun scale(race: Race) = when (race) {
         Race.HALFLING -> 0.8f
-        Race.DWARF -> 0.9f
+        Race.DWARF, Race.THERIAN -> 0.9f
         else -> 1f
     }
 }

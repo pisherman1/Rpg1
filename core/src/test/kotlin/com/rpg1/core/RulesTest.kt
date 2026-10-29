@@ -130,3 +130,25 @@ class RulesTest {
         assertEquals(1, Monster(MonsterType.KOBOLD, ScriptedDice(1, 1)).maxHp) // 2d6-2 floors at 1
     }
 }
+
+class TherianTest {
+    @Test
+    fun therianBonusesAreInLineWithOtherRaces() {
+        val t = Hero.create("Kit", Race.THERIAN, CharClass.ROGUE, listOf(15, 14, 13, 12, 10, 8))
+        assertEquals(17, t.abilities[Ability.DEX])
+        assertEquals(14, t.abilities[Ability.WIS]) // 13 + 1 (rogue priority puts 13 in WIS)
+        assertEquals(6, t.speed)
+        assertEquals(9, Race.THERIAN.sightRadius)
+        // Same +3 budget as elves and halflings.
+        assertEquals(3, Race.THERIAN.bonuses.values.sum())
+        assertEquals(Race.ELF.bonuses.values.sum(), Race.THERIAN.bonuses.values.sum())
+    }
+
+    @Test
+    fun therianPremadeAndDraftsWork() {
+        val b = PartyBuilder(Dice(kotlin.random.Random(1)))
+        b.drafts[0].race = Race.THERIAN
+        val h = b.build()[0]
+        assertEquals(Race.THERIAN, h.race)
+    }
+}

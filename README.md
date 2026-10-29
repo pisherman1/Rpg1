@@ -65,7 +65,8 @@ that hero's character sheet.
   banner; the character sheet previews the next level.
 - Casters start with one cantrip and one spell (Wizard: Fire Bolt, Magic Missile; Cleric: Sacred
   Flame, Cure Wounds) and learn one more every level.
-- Races: Human, Dwarf, Elf, Halfling (Lucky rerolls natural 1s).
+- Races: Human, Dwarf, Elf, Halfling (Lucky rerolls natural 1s) and Therian (fox-masked folk:
+  DEX +2, WIS +1, sight 45 ft, Fox's Cunning gives advantage on Stealth for surprise).
 - Classes: Fighter (Second Wind, Action Surge, Extra Attack at 5th, Indomitable at 9th, a third
   attack at 10th), Rogue (Sneak Attack with advantage or an adjacent ally, Aim, Cunning Action,
   Uncanny Dodge at 5th, Evasive at 6th), Wizard and Cleric.

@@ -861,7 +861,8 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             // A monster is surprised only if it notices no one: compare against the party's worst Stealth.
             val totals = consciousHeroes.map { h ->
                 val bonus = h.abilities.mod(Ability.DEX) + if (h.charClass == CharClass.ROGUE) h.proficiency else 0
-                h to dice.d20(lucky = h.lucky).natural + bonus
+                val mode = if (h.race == Race.THERIAN) RollMode.ADVANTAGE else RollMode.NORMAL
+                h to dice.d20(mode, lucky = h.lucky).natural + bonus
             }
             val worst = totals.minBy { it.second }
             log("Stealth: " + totals.joinToString(", ") { "${it.first.name} ${it.second}" }, LogKind.ROLL)

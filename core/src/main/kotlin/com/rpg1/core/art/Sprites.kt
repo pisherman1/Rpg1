@@ -668,6 +668,26 @@ object Sprites {
         "................", "................", "................", "................",
     )
 
+    /** Therian fox mask, ears and tail, layered over any hero. */
+    val FOX = s("fox",
+        "................",
+        "...kk......kk...",
+        "...kok....kok...",
+        "...kook..kook...",
+        "....kooooook....",
+        "....kokookok....",
+        "....kowkkwok....",
+        ".....kwwwwk.....",
+        "................",
+        "................",
+        "................",
+        "...k............",
+        "..kok...........",
+        ".koook..........",
+        "kwook...........",
+        ".kkk............",
+    )
+
     /** Overlay that turns a class sprite into its male or female look. */
     fun genderOverlay(cls: String, female: Boolean): Sprite = when (cls) {
         "FIGHTER" -> if (female) FIGHTER_FEMALE else FIGHTER_MALE
@@ -676,7 +696,7 @@ object Sprites {
         else -> if (female) CLERIC_FEMALE else CLERIC_MALE
     }
 
-    val overlays = listOf(FIGHTER_MALE, FIGHTER_FEMALE, ROGUE_MALE, ROGUE_FEMALE, WIZARD_MALE, WIZARD_FEMALE, CLERIC_MALE, CLERIC_FEMALE)
+    val overlays = listOf(FOX, FIGHTER_MALE, FIGHTER_FEMALE, ROGUE_MALE, ROGUE_FEMALE, WIZARD_MALE, WIZARD_FEMALE, CLERIC_MALE, CLERIC_FEMALE)
 
     val all: List<Sprite> = listOf(
         FIGHTER, ROGUE, WIZARD, CLERIC,
