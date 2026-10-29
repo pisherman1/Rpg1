@@ -45,4 +45,5 @@ android {
 
 dependencies {
     implementation(project(":render"))
+    implementation(project(":audio"))
 }

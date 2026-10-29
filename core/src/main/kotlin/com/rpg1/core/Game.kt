@@ -1,5 +1,7 @@
 package com.rpg1.core
 
+import com.rpg1.core.audio.SoundId
+
 enum class LogKind { INFO, ROLL, GOOD, BAD, LOOT, LEVEL }
 
 data class LogEntry(val text: String, val kind: LogKind)
@@ -157,6 +159,13 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     private fun onStairs(h: Hero) = h.x == dungeon.stairs.x && h.y == dungeon.stairs.y
 
     fun drainFx(): List<Fx> = pendingFx.toList().also { pendingFx.clear() }
+
+    /** Sounds for events the renderer can't infer from visual effects. */
+    private val pendingSounds = mutableListOf<SoundId>()
+    fun drainSounds(): List<SoundId> = pendingSounds.toList().also { pendingSounds.clear() }
+    private fun sound(id: SoundId) {
+        pendingSounds += id
+    }
 
     val isBusy get() = walkPath.isNotEmpty() || phase == Phase.MONSTER_TURN || autoEndTurn
 
@@ -747,6 +756,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             minionsFollow()
         }
         updateFov()
+        sound(SoundId.STEP)
         pickUp(h)
         if (phase == Phase.EXPLORING) {
             moveHuntersWhileExploring()
@@ -855,6 +865,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         seen.forEach { it.aware = true }
 
         log("Combat! ${names(seen)}. Roll initiative!", LogKind.BAD)
+        sound(SoundId.COMBAT_START)
         monsters.forEach { it.acted = false }
         val all = livingHeroes + seen + minions
         for (c in all) initiativeRolls[c] = rollInitiative(c)
@@ -952,6 +963,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
 
     private fun endCombatIfOver(): Boolean {
         if (phase == Phase.GAME_OVER || combatMonsters().isNotEmpty()) return false
+        sound(SoundId.VICTORY)
         endCombat("The fight is over.")
         return true
     }
@@ -1353,6 +1365,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                 h.deathSuccesses = 0
                 h.deathFailures = 0
                 log("${h.name} falls unconscious!", LogKind.BAD)
+                sound(SoundId.HERO_DOWN)
                 updateFov()
                 checkTotalPartyKill()
             }
@@ -1399,6 +1412,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     }
 
     private fun heroDies(h: Hero, message: String) {
+        sound(SoundId.HERO_DIE)
         h.dead = true
         h.hp = 0
         graves += Point(h.x, h.y)
@@ -1794,6 +1808,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         }
         if (!useAction()) return
         source.potions--
+        sound(SoundId.POTION)
         val healed = target.heal(dice.roll(d("2d4+2")))
         pendingFx += Fx.Text(target.x, target.y, "+$healed", FxKind.HEAL)
         log(if (target === giver) "${target.name} drinks a potion of healing: +$healed HP."
@@ -1860,6 +1875,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         if (phase != Phase.EXPLORING) return
         val healed = livingHeroes.sumOf { it.shortRest(dice) }
         log("The party takes a short rest and recovers $healed HP in total.", LogKind.GOOD)
+        sound(SoundId.REST)
         for (h in livingHeroes.filter { it.uses(Resource.ARCANE_RECOVERY) > 0 }) {
             var budget = (h.level + 1) / 2
             var recovered = 0
@@ -1886,6 +1902,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             pendingFx += Fx.Text(it.x, it.y, "rested", FxKind.HEAL)
         }
         log("The party takes a long rest. HP, spell slots and features restored.", LogKind.GOOD)
+        sound(SoundId.REST)
         wanderingMonsterCheck(1, 3)
     }
 
@@ -1902,6 +1919,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
 
     private fun descend() {
         if (phase != Phase.EXPLORING || !onStairs(leader)) return
+        sound(SoundId.DESCEND)
         depth++
         enterLevel()
     }
@@ -1932,6 +1950,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     }
 
     private fun openChest(h: Hero) {
+        sound(SoundId.CHEST)
         val gold = dice.roll(depth * 4, 10)
         h.gold += gold
         val found = mutableListOf("$gold gold")

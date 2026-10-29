@@ -19,6 +19,7 @@ class MainActivity : Activity(), GameView.Host {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         GameSession.init(this)
+        GameAudio.init(this)
         // The GL world renders underneath; the Canvas UI draws on top and leaves the map area clear.
         worldView = WorldSurfaceView(this) { gameView.useCanvasWorld() }
         gameView = GameView(this, this)
@@ -33,11 +34,13 @@ class MainActivity : Activity(), GameView.Host {
     override fun onResume() {
         super.onResume()
         worldView.onResume()
+        GameAudio.resume()
     }
 
     override fun onPause() {
         super.onPause()
         worldView.onPause()
+        GameAudio.pause()
         GameSession.autosave()
     }
 

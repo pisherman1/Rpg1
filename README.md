@@ -14,7 +14,7 @@ To build locally you need the Android SDK (API 35) and JDK 17:
 
 ```sh
 ./gradlew :app:assembleDebug                  # APK in app/build/outputs/apk/debug/
-./gradlew -PcoreOnly=true :core:test :render:test   # no Android SDK needed
+./gradlew -PcoreOnly=true :core:test :render:test :audio:test   # no Android SDK needed
 ```
 
 ## Playing
@@ -112,6 +112,14 @@ Creatures glide between squares, bob when idle, lunge when attacking, flash when
 out when slain; crits shake the screen. Text and UI are drawn on top with Canvas so they stay
 crisp. If OpenGL fails on a device, the game falls back to plain Canvas drawing.
 
+## Sound and music
+
+All audio is synthesised by the game itself (no sound files): a small chiptune synthesizer with
+square, pulse, triangle and noise channels, envelopes, pitch slides and echo renders ~30 sound
+effects and four music tracks (title, exploration, combat and defeat) on first launch and caches
+them. Effects are timed to the animations (a spell's cast and its impact), music crossfades
+between exploring and combat, and both can be turned off in the Menu.
+
 ## Project layout
 
 - `core/` — pure Kotlin rules engine and pixel art (`art/Sprites.kt`, sprites as text), with
@@ -119,6 +127,8 @@ crisp. If OpenGL fails on a device, the game falls back to plain Canvas drawing.
 - `render/` — pure Kotlin world renderer: animation, particles and lighting (`WorldAnimator`),
   and the OpenGL pipeline (`WorldRenderer`) behind a small `Gl` interface, so it can also run
   on desktop OpenGL.
+- `audio/` — pure Kotlin synthesizer (`Synth`), sound-effect designs (`Sfx`) and the music
+  sequencer with its compositions (`Music`).
 - `app/` — the Android frontend: `WorldSurfaceView` (GL), `GameView` (Canvas UI) and
   `MainActivity`.
 

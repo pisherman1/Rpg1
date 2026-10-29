@@ -10,6 +10,7 @@ import com.rpg1.core.Monster
 import com.rpg1.core.Phase
 import com.rpg1.core.Point
 import com.rpg1.core.Tile
+import com.rpg1.core.audio.SoundId
 import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.exp
@@ -66,6 +67,17 @@ class WorldAnimator(private val atlas: Atlas) {
     private val pulses = mutableListOf<Pulse>()
     private val particles = Particles(rng)
     private var torches = listOf<Point>()
+
+    /** Sound cues timed to the animation; collected with [drainCues]. */
+    private class Cue(val id: SoundId, var delay: Float)
+    private val cueQueue = mutableListOf<Cue>()
+    private val readyCues = mutableListOf<SoundId>()
+
+    fun drainCues(): List<SoundId> = readyCues.toList().also { readyCues.clear() }
+
+    private fun cue(id: SoundId, delay: Float = 0f) {
+        if (delay <= 0f) readyCues += id else cueQueue += Cue(id, delay)
+    }
 
     /** Floating combat text for the UI layer to draw (world-pixel positions). */
     val floatTexts = mutableListOf<FloatText>()
@@ -140,12 +152,22 @@ class WorldAnimator(private val atlas: Atlas) {
             if (c is Monster && g.dungeon.isVisible(c.x, c.y)) {
                 ghosts += Ghost(atlas.id(Atlas.monsterKey(c.type)), a.x, a.y)
                 particles.dust(a.x + 8, a.y + 10, 14)
+                cue(SoundId.MONSTER_DIE, 0.05f)
             } else if (c is Hero) {
                 particles.dust(a.x + 8, a.y + 10, 18)
             }
         }
 
         handleFx(g, fx)
+        val cit = cueQueue.iterator()
+        while (cit.hasNext()) {
+            val c = cit.next()
+            c.delay -= dt
+            if (c.delay <= 0f) {
+                readyCues += c.id
+                cit.remove()
+            }
+        }
 
         val pit = projectiles.iterator()
         while (pit.hasNext()) {
@@ -198,6 +220,7 @@ class WorldAnimator(private val atlas: Atlas) {
         pulses.clear()
         particles.clear()
         floatTexts.clear()
+        cueQueue.clear()
         val d = g.dungeon
         torches = buildList {
             for (y in 0 until d.height) for (x in 0 until d.width) {
@@ -219,6 +242,14 @@ class WorldAnimator(private val atlas: Atlas) {
             is Fx.Bolt -> {
                 projectiles += Projectile(f.fromX * TILE + 8f, f.fromY * TILE + 8f, f.toX * TILE + 8f, f.toY * TILE + 8f,
                     f.kind, boltIndex * 0.06f)
+                if (boltIndex < 3) cue(when (f.kind) {
+                    FxKind.ARROW -> SoundId.BOW
+                    FxKind.FIRE -> SoundId.FIRE_CAST
+                    FxKind.RADIANT -> SoundId.HOLY
+                    FxKind.LIGHTNING -> SoundId.ZAP
+                    FxKind.NECROTIC -> SoundId.NECRO
+                    else -> SoundId.MAGIC
+                }, boltIndex * 0.06f)
                 boltIndex++
             }
             is Fx.Text -> {
@@ -227,6 +258,7 @@ class WorldAnimator(private val atlas: Atlas) {
                 floatTexts += FloatText(f.x * TILE + 8f, f.y * TILE + 4f, f.text, f.kind, -delay - 0.05f)
                 val target = creatureAt(g, f.x, f.y)
                 val targetAnim = target?.let { anims[it] }
+                textCue(f, delay)?.let { cue(it, delay) }
                 when (f.kind) {
                     FxKind.DAMAGE, FxKind.CRIT -> {
                         targetAnim?.flashDelay = delay
@@ -266,7 +298,35 @@ class WorldAnimator(private val atlas: Atlas) {
 
     private fun chebyshevTo(c: Creature, x: Int, y: Int) = maxOf(abs(c.x - x), abs(c.y - y))
 
+    /** The sound for a floating combat text, if any. */
+    private fun textCue(f: Fx.Text, delay: Float): SoundId? = when (f.kind) {
+        FxKind.DAMAGE -> SoundId.HIT
+        FxKind.CRIT -> SoundId.CRIT
+        FxKind.MISS -> if (f.text == "miss") SoundId.MISS else null
+        FxKind.HEAL -> when (f.text) {
+            "LEVEL UP" -> SoundId.LEVEL_UP
+            "revived", "rested" -> null
+            else -> if (f.text.endsWith("HD")) null else SoundId.HEAL
+        }
+        FxKind.LOOT -> SoundId.LOOT
+        FxKind.NECROTIC -> if (f.text == "rise!") SoundId.RAISE else null
+        FxKind.RADIANT -> if (f.text == "blessed") SoundId.HOLY else null
+        FxKind.INFO -> when {
+            f.text.startsWith("+") && f.text.endsWith("g") -> SoundId.COIN
+            f.text == "Zzz" -> SoundId.SLEEP
+            f.text == "challenged" -> SoundId.CHALLENGE
+            f.text == "marked" -> SoundId.MARK
+            else -> null
+        }
+        else -> null
+    }
+
     private fun impact(x: Float, y: Float, kind: FxKind) {
+        when (kind) {
+            FxKind.FIRE -> cue(SoundId.EXPLOSION)
+            FxKind.LIGHTNING -> cue(SoundId.THUNDER)
+            else -> {}
+        }
         val color = colorOf(kind)
         when (kind) {
             FxKind.ARROW -> particles.burst(x, y, 0xD8C8A0, 5, 30f)

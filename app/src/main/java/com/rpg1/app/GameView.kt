@@ -30,6 +30,8 @@ import com.rpg1.core.Premades
 import com.rpg1.core.Race
 import com.rpg1.core.SpellTarget
 import com.rpg1.core.Subclass
+import com.rpg1.core.audio.SoundId
+import com.rpg1.core.audio.TrackId
 import com.rpg1.core.Tile
 import com.rpg1.core.art.Sprites
 import com.rpg1.core.formatModifier
@@ -82,7 +84,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     private val cHpLow = 0xFFE04040.toInt()
 
     // --- Layout & input -----------------------------------------------------
-    private class Hit(val rect: RectF, val action: () -> Unit)
+    private class Hit(val rect: RectF, val action: () -> Unit, val click: Boolean)
     private val hits = mutableListOf<Hit>()
     private var downX = 0f
     private var downY = 0f
@@ -164,8 +166,15 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             animator.setViewport(mapW, height, tilePx / 16)
             animator.update(g, g.drainFx(), if (paused) 0f else dt)
             host.submitWorld(if (canvasWorld) null else animator.buildFrame(g))
+            (g.drainSounds() + animator.drainCues()).forEach { GameAudio.play(it) }
+            GameAudio.setMusic(when {
+                g.phase == Phase.GAME_OVER -> TrackId.DEFEAT
+                g.inCombat -> TrackId.COMBAT
+                else -> TrackId.EXPLORE
+            })
         } else {
             host.submitWorld(null)
+            GameAudio.setMusic(TrackId.TITLE)
         }
         invalidate()
         Choreographer.getInstance().postFrameCallback(this)
@@ -239,6 +248,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     private fun handleTap(x: Float, y: Float) {
         // Topmost regions are added last.
         hits.lastOrNull { it.rect.contains(x, y) }?.let {
+            if (it.click) GameAudio.play(SoundId.CLICK)
             it.action()
             return
         }
@@ -247,8 +257,8 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         g.tap(animator.screenToTileX(x), animator.screenToTileY(y))
     }
 
-    private fun hit(rect: RectF, action: () -> Unit) {
-        hits += Hit(RectF(rect), action)
+    private fun hit(rect: RectF, click: Boolean = false, action: () -> Unit) {
+        hits += Hit(RectF(rect), action, click)
     }
 
     // =======================================================================
@@ -327,7 +337,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         box(c, r, bg, if (active) cGold else 0xFF4E4266.toInt(), 3f)
         drawFitText(c, label, r.centerX(), r.centerY() + r.height() * 0.17f, r.height() * 0.42f, r.width() * 0.9f,
             if (enabled) cText else cDim, Paint.Align.CENTER)
-        if (enabled) hit(r, action)
+        if (enabled) hit(r, click = true, action = action)
     }
 
     private fun sprite(c: Canvas, bmp: Bitmap, left: Float, top: Float, size: Float, scale: Float = 1f) {
@@ -992,6 +1002,11 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
         val by = r.bottom - pad - h * 0.09f
         val half = (r.width() - pad * 3) / 2
+        val ty = by - pad - h * 0.08f
+        button(c, RectF(r.left + pad, ty, r.left + pad + half, ty + h * 0.08f), "Music: " + if (GameAudio.musicOn) "On" else "Off",
+            active = GameAudio.musicOn) { GameAudio.musicOn = !GameAudio.musicOn }
+        button(c, RectF(r.right - pad - half, ty, r.right - pad, ty + h * 0.08f), "Sound: " + if (GameAudio.soundOn) "On" else "Off",
+            active = GameAudio.soundOn) { GameAudio.soundOn = !GameAudio.soundOn }
         button(c, RectF(r.left + pad, by, r.left + pad + half, by + h * 0.09f), if (canSave) "Resume" else "Back") { menuOpen = false }
         if (screen == Screen.PLAY) {
             button(c, RectF(r.right - pad - half, by, r.right - pad, by + h * 0.09f), "Save & Quit to Title") {

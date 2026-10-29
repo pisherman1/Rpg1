@@ -19,7 +19,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Rules engine and renderer tests
-        run: ./gradlew :core:test :render:test
+        run: ./gradlew :core:test :render:test :audio:test
 
       - name: Build APK
         run: ./gradlew :app:assembleDebug
