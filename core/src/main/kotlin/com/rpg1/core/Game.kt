@@ -24,6 +24,9 @@ enum class ActionId {
     PRESERVE_LIFE, DESTRUCTIVE_WRATH, OVERCHANNEL,
 }
 
+/** A hero just reached a new level; the UI celebrates it. */
+data class LevelUpNotice(val heroIndex: Int, val level: Int, val hpGain: Int, val gains: List<String>)
+
 data class GameAction(
     val id: ActionId,
     val label: String,
@@ -159,6 +162,9 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     private fun onStairs(h: Hero) = h.x == dungeon.stairs.x && h.y == dungeon.stairs.y
 
     fun drainFx(): List<Fx> = pendingFx.toList().also { pendingFx.clear() }
+
+    private val levelUps = mutableListOf<LevelUpNotice>()
+    fun drainLevelUps(): List<LevelUpNotice> = levelUps.toList().also { levelUps.clear() }
 
     /** Sounds for events the renderer can't infer from visual effects. */
     private val pendingSounds = mutableListOf<SoundId>()
@@ -719,7 +725,8 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         val ally = heroAt(next.x, next.y)
         // In combat you may move through an ally's square but not stop in it.
         val minion = monsterAt(next.x, next.y)?.takeIf { it.ally }
-        val blocked = enemyAt(next.x, next.y) != null || ((ally != null || minion != null) && (phase == Phase.PLAYER_TURN || minion != null) && isLast)
+        // In combat you can pass through allies and minions but not stop on them; outside combat minions swap places.
+        val blocked = enemyAt(next.x, next.y) != null || ((ally != null || minion != null) && phase == Phase.PLAYER_TURN && isLast)
         if (blocked || !dungeon.canStep(h.x, h.y, next.x, next.y)) {
             walkPath.clear()
             return
@@ -751,6 +758,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             }
         } else {
             val from = Point(h.x, h.y)
+            minion?.moveTo(from.x, from.y)
             h.moveTo(next.x, next.y)
             followLeader(from)
             minionsFollow()
@@ -1143,7 +1151,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     private fun weaponAttack(h: Hero, target: Monster, weapon: Weapon) {
         if (weapon.ranged) pendingFx += Fx.Bolt(h.x, h.y, target.x, target.y, FxKind.ARROW)
         val label = "${h.name}'s " + if (h.weaponBonus > 0) "+${h.weaponBonus} ${weapon.name}" else weapon.name
-        val hit = heroAttackRoll(h, target, h.attackBonus(weapon), weapon.ranged, label) ?: return
+        val hit = heroAttackRoll(h, target, h.attackBonus(weapon), weapon.ranged, label, weapon = true) ?: return
         var damage = dice.roll(weapon.damage, hit.critical) + h.damageBonus(weapon)
         var detail = "${weapon.damage}${fmt(h.damageBonus(weapon))}"
         // Sneak Attack: advantage, or an ally next to the target (and no disadvantage).
@@ -1192,17 +1200,23 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
     private class Hit(val roll: D20Roll, val critical: Boolean)
 
     /** Rolls a hero's attack and logs it. Returns the hit (with crit flag), or null on a miss. */
-    private fun heroAttackRoll(h: Hero, target: Monster, bonus: Int, ranged: Boolean, label: String): Hit? {
+    private fun heroAttackRoll(h: Hero, target: Monster, bonus: Int, ranged: Boolean, label: String, weapon: Boolean = false): Hit? {
         val assassinate = h.has(Feature.ASSASSINATE) && !target.acted
         val advantage = target.marked || aiming || target.asleep || assassinate
         val enemyAdjacent = combatMonsters().any { it.isAdjacentTo(h) && !it.asleep }
         val disadvantage = target.dodging || (ranged && enemyAdjacent)
-        val roll = dice.d20(RollMode.of(advantage, disadvantage), h.lucky)
+        var roll = dice.d20(RollMode.of(advantage, disadvantage), h.lucky)
         target.marked = false
         aiming = false
         val bless = if (h.blessed) dice.roll(4) else 0
-        val total = roll.natural + bonus + bless
-        val hit = roll.isCritical || (!roll.isFumble && total >= target.armorClass)
+        var total = roll.natural + bonus + bless
+        var hit = roll.isCritical || (!roll.isFumble && total >= target.armorClass)
+        if (!hit && weapon && h.spend(Resource.INDOMITABLE)) {
+            log("${h.name} is Indomitable and swings again!", LogKind.GOOD)
+            roll = dice.d20(RollMode.of(advantage, disadvantage), h.lucky)
+            total = roll.natural + bonus + bless
+            hit = roll.isCritical || (!roll.isFumble && total >= target.armorClass)
+        }
         // Melee hits on a sleeping foe within reach are critical, as against any helpless creature.
         val critical = hit && (roll.isCritical || (target.asleep && !ranged && h.isAdjacentTo(target)) ||
             (h.has(Feature.ASSASSINATE) && target.surprised))
@@ -1274,10 +1288,12 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         val share = m.type.xp / livingHeroes.size.coerceAtLeast(1)
         log("${m.name} is slain! +$share XP each", LogKind.GOOD)
         for (h in livingHeroes) {
+            val before = h.level
             h.gainXp(share, dice).forEach {
                 log(it, LogKind.LEVEL)
                 pendingFx += Fx.Text(h.x, h.y, "LEVEL UP", FxKind.HEAL)
             }
+            for (lvl in before + 1..h.level) levelUps += LevelUpNotice(party.indexOf(h), lvl, h.hpPerLevel, h.levelGains(lvl))
         }
         if (dungeon.itemAt(m.x, m.y) == null && dungeon[m.x, m.y].walkable) {
             val boss = m.type == MonsterType.OGRE
@@ -1579,7 +1595,7 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
                     return
                 }
             }
-            SpellTarget.ADJACENT_AREA -> if (combatMonsters().none { it.isAdjacentTo(h) }) {
+            SpellTarget.ADJACENT_AREA -> if (combatMonsters().none { it.distanceTo(h) <= maxOf(1, spell.radius) }) {
                 log("No enemies within reach of ${spell.displayName}.", LogKind.INFO)
                 return
             }
@@ -1635,6 +1651,23 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         fun scaled() = scaled(spell.dice)
         when (spell) {
             Spell.FIRE_BOLT -> spellAttack(h, target!!, spell, scaled(), FxKind.FIRE)
+            Spell.ACID_ARROW -> spellAttack(h, target!!, spell, scaled(), FxKind.NECROTIC)
+            Spell.INFLICT_WOUNDS -> spellAttack(h, target!!, spell, scaled(), FxKind.NECROTIC, melee = true)
+            Spell.SPIRIT_GUARDIANS -> areaDamage(h, spell, combatMonsters().filter { it.distanceTo(h) <= spell.radius },
+                scaled(), FxKind.RADIANT, h.x, h.y)
+            Spell.LIGHTNING_BOLT -> {
+                val t = target!!
+                // Extend the line from the caster through the target out to the spell's range, stopping at walls.
+                val dist = maxOf(1, h.distanceTo(t))
+                val ex = h.x + (t.x - h.x) * spell.range / dist
+                val ey = h.y + (t.y - h.y) * spell.range / dist
+                val path = Dungeon.line(h.x, h.y, ex, ey).drop(1).takeWhile { dungeon[it.x, it.y].transparent }
+                val victims = combatMonsters().filter { m -> path.any { it.x == m.x && it.y == m.y } }
+                val end = path.lastOrNull() ?: Point(t.x, t.y)
+                pendingFx += Fx.Bolt(h.x, h.y, end.x, end.y, FxKind.LIGHTNING)
+                areaDamage(h, spell, victims, scaled(), FxKind.LIGHTNING, h.x, h.y)
+            }
+            Spell.MASS_CURE_WOUNDS -> partyInRange(h, spell).forEach { healHero(h, it, scaled(), slot) }
             Spell.RAY_OF_FROST -> spellAttack(h, target!!, spell, scaled(), FxKind.FORCE)
             Spell.SCORCHING_RAY -> {
                 val rays = 3 + upcast
@@ -1667,15 +1700,16 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
             }
             Spell.BURNING_HANDS -> areaDamage(h, spell, combatMonsters().filter { it.isAdjacentTo(h) }, scaled(), FxKind.FIRE, h.x, h.y)
             Spell.THUNDERWAVE -> areaDamage(h, spell, combatMonsters().filter { it.isAdjacentTo(h) }, scaled(), FxKind.LIGHTNING, h.x, h.y)
-            Spell.SHATTER, Spell.FIREBALL, Spell.CALL_LIGHTNING -> {
+            Spell.SHATTER, Spell.FIREBALL, Spell.CALL_LIGHTNING, Spell.ICE_STORM, Spell.CONE_OF_COLD, Spell.FLAME_STRIKE -> {
                 val center = target!!
                 val victims = combatMonsters().filter { chebyshev(it.x, it.y, center.x, center.y) <= spell.radius }
                 val fx = when (spell) {
-                    Spell.FIREBALL -> FxKind.FIRE
-                    Spell.CALL_LIGHTNING -> FxKind.LIGHTNING
+                    Spell.FIREBALL, Spell.FLAME_STRIKE -> FxKind.FIRE
+                    Spell.CALL_LIGHTNING, Spell.ICE_STORM, Spell.CONE_OF_COLD -> FxKind.LIGHTNING
                     else -> FxKind.FORCE
                 }
-                pendingFx += if (spell == Spell.CALL_LIGHTNING) Fx.Bolt(center.x, center.y - 3, center.x, center.y, fx)
+                pendingFx += if (spell == Spell.CALL_LIGHTNING || spell == Spell.FLAME_STRIKE || spell == Spell.ICE_STORM)
+                    Fx.Bolt(center.x, center.y - 3, center.x, center.y, fx)
                 else Fx.Bolt(h.x, h.y, center.x, center.y, fx)
                 areaDamage(h, spell, victims, scaled(), fx, center.x, center.y)
             }
@@ -1773,9 +1807,9 @@ class Game private constructor(val party: List<Hero>, val dice: Dice, fresh: Boo
         log("${caster.name} lays a diamond on ${target.name}'s brow... ${target.name} breathes again!", LogKind.LEVEL)
     }
 
-    private fun spellAttack(h: Hero, target: Monster, spell: Spell, dmgDice: DiceExpr, fx: FxKind): Boolean {
+    private fun spellAttack(h: Hero, target: Monster, spell: Spell, dmgDice: DiceExpr, fx: FxKind, melee: Boolean = false): Boolean {
         pendingFx += Fx.Bolt(h.x, h.y, target.x, target.y, fx)
-        val hit = heroAttackRoll(h, target, h.spellAttackBonus, true, "${h.name}'s ${spell.displayName}") ?: return false
+        val hit = heroAttackRoll(h, target, h.spellAttackBonus, !melee, "${h.name}'s ${spell.displayName}") ?: return false
         damageMonster(target, rollSpellDamage(dmgDice, hit.critical), hit.critical, spell.damageType, "$dmgDice")
         return true
     }

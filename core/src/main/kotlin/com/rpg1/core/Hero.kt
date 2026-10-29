@@ -70,6 +70,7 @@ class Hero(
         Resource.WRATH_OF_THE_STORM -> if (has(Feature.WRATH_OF_THE_STORM)) maxOf(1, abilities.mod(Ability.WIS)) else 0
         Resource.OVERCHANNEL -> if (has(Feature.OVERCHANNEL)) 1 else 0
         Resource.ARCANE_RECOVERY -> if (has(Feature.ARCANE_RECOVERY)) 1 else 0
+        Resource.INDOMITABLE -> if (charClass == CharClass.FIGHTER && level >= 9) 1 else 0
     }
 
     fun uses(r: Resource) = (maxUses(r) - (resourcesUsed[r] ?: 0)).coerceAtLeast(0)
@@ -150,7 +151,7 @@ class Hero(
     override val speed get() = race.speed + if (has(ItemType.BOOTS_OF_STRIDING)) 1 else 0
 
     override val armorClass get() = charClass.armor.armorClass(abilities.mod(Ability.DEX)) + armorBonus + protection +
-        if (has(Feature.SHIELD_WALL)) 1 else 0
+        (if (has(Feature.SHIELD_WALL)) 1 else 0) + (if (evasive) 1 else 0)
 
     val lucky get() = race == Race.HALFLING
 
@@ -179,7 +180,64 @@ class Hero(
     val cantripDice get() = if (level >= 5) 2 else 1
 
     /** Fighters attack twice per Attack action from 5th level. */
-    val attacksPerAction get() = if (charClass == CharClass.FIGHTER && level >= 5) 2 else 1
+    val attacksPerAction get() = when {
+        charClass != CharClass.FIGHTER -> 1
+        level >= 10 -> 3
+        level >= 5 -> 2
+        else -> 1
+    }
+
+    /** Rogues learn to slip blows from 6th level. */
+    private val evasive get() = charClass == CharClass.ROGUE && level >= 6
+
+    /** Max HP gained per level after the first. */
+    val hpPerLevel get() = maxOf(1, charClass.hitDie / 2 + 1 + conMod + toughness)
+
+    fun isAbilityImprovementLevel(lvl: Int) = lvl in ASI_LEVELS ||
+        (charClass == CharClass.FIGHTER && lvl == 6) || (charClass == CharClass.ROGUE && lvl == 10)
+
+    /** Everything a hero gains on reaching [lvl] (besides hit points), in words. */
+    fun levelGains(lvl: Int): List<String> {
+        val gains = mutableListOf<String>()
+        if (lvl == SUBCLASS_LEVEL) gains += if (subclass == null) "Choose a subclass" else "${subclass!!.displayName} path"
+        subclass?.features?.filter { it.level == lvl && lvl != SUBCLASS_LEVEL }?.forEach { gains += it.title }
+        if (subclass == null && lvl == 7) gains += "Subclass feature"
+        if (lvl == SUBCLASS_LEVEL) subclass?.features?.filter { it.level == lvl }?.forEach { gains += it.title }
+        when (charClass) {
+            CharClass.FIGHTER -> when (lvl) {
+                2 -> gains += "Action Surge: take an extra action once per rest"
+                5 -> gains += "Extra Attack: attack twice per Attack action"
+                9 -> gains += "Indomitable: reroll your first missed attack each long rest"
+                10 -> gains += "Extra Attack (2): attack three times per Attack action"
+            }
+            CharClass.ROGUE -> {
+                when (lvl) {
+                    2 -> gains += "Cunning Action: Dash or Disengage as a bonus action"
+                    5 -> gains += "Uncanny Dodge: halve the damage of a hit once per round"
+                    6 -> gains += "Evasive: +1 AC"
+                }
+                if (lvl % 2 == 1 && lvl > 1) gains += "Sneak Attack ${(lvl + 1) / 2}d6"
+            }
+            CharClass.WIZARD, CharClass.CLERIC -> {
+                val oldSlots = SpellSlots.forLevel(lvl - 1)
+                val newSlots = SpellSlots.forLevel(lvl)
+                if (newSlots.size > oldSlots.size) gains += "${ordinal(newSlots.size)}-level spell slots"
+                else gains += "Spell slots ${newSlots.joinToString("/")}"
+                if (lvl == 5) gains += "Cantrips deal double dice"
+                gains += "Learn a new spell"
+            }
+        }
+        if (isAbilityImprovementLevel(lvl)) gains += "Ability Score Improvement (+2)"
+        if (lvl == 5 || lvl == 9) gains += "Proficiency bonus +${2 + (lvl - 1) / 4}"
+        return gains
+    }
+
+    private fun ordinal(n: Int) = when (n) {
+        1 -> "1st"
+        2 -> "2nd"
+        3 -> "3rd"
+        else -> "${n}th"
+    }
 
     val hasUncannyDodge get() = charClass == CharClass.ROGUE && level >= 5
 
@@ -276,22 +334,10 @@ class Hero(
                 }
                 maxSpellSlots = newMax
             }
-            val news = mutableListOf("+$gain max HP")
-            if (level in ASI_LEVELS || (charClass == CharClass.FIGHTER && level == 6)) {
-                pendingAbilityPoints += 2
-                news += "ability score improvement"
-            }
-            if (charClass.isCaster && learnableSpells().size > pendingSpells) {
-                pendingSpells++
-                news += "a new spell"
-            }
-            if (level == SUBCLASS_LEVEL) news += "choose a subclass"
+            if (isAbilityImprovementLevel(level)) pendingAbilityPoints += 2
+            if (charClass.isCaster && learnableSpells().size > pendingSpells) pendingSpells++
             grantSubclassSpells()
-            subclass?.features?.filter { it.level == level }?.forEach { news += it.title }
-            if (level == 5 && charClass == CharClass.FIGHTER) news += "Extra Attack"
-            if (level == 5 && charClass == CharClass.ROGUE) news += "Uncanny Dodge"
-            if (level == 2 && charClass == CharClass.FIGHTER) news += "Action Surge"
-            if (level == 2 && charClass == CharClass.ROGUE) news += "Cunning Action"
+            val news = listOf("+$gain max HP") + levelGains(level).map { it.substringBefore(':') }
             messages += "$name reaches level $level! (${news.joinToString(", ")})"
         }
         return messages
@@ -367,7 +413,8 @@ class Hero(
 
     companion object {
         const val MAX_LEVEL = 10
-        val XP_TABLE = intArrayOf(0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000)
+        /** A gentler curve than 5e's: roughly a level every half to two-thirds of a dungeon floor. */
+        val XP_TABLE = intArrayOf(0, 80, 250, 550, 1000, 1600, 2350, 3250, 4300, 5500)
         val ASI_LEVELS = setOf(4, 8)
         const val SUBCLASS_LEVEL = 3
 

@@ -21,6 +21,7 @@ import com.rpg1.core.Game
 import com.rpg1.core.Hero
 import com.rpg1.core.Item
 import com.rpg1.core.ItemSlot
+import com.rpg1.core.LevelUpNotice
 import com.rpg1.core.ActionId
 import com.rpg1.core.ItemKind
 import com.rpg1.core.LogKind
@@ -120,6 +121,10 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     private var subMenu: String? = null
     private var subMenuFor: Hero? = null
 
+    /** Level-up celebrations waiting to be shown, oldest first. */
+    private val levelBanners = ArrayDeque<LevelUpNotice>()
+    private var bannerStart = 0L
+
     /** Overlays that pause the game while open. */
     private val paused get() = menuOpen || levelUpHero != null || inventoryOpen
 
@@ -167,6 +172,10 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             animator.update(g, g.drainFx(), if (paused) 0f else dt)
             host.submitWorld(if (canvasWorld) null else animator.buildFrame(g))
             (g.drainSounds() + animator.drainCues()).forEach { GameAudio.play(it) }
+            g.drainLevelUps().forEach {
+                if (levelBanners.isEmpty()) bannerStart = nowMs
+                levelBanners.addLast(it)
+            }
             GameAudio.setMusic(when {
                 g.phase == Phase.GAME_OVER -> TrackId.DEFEAT
                 g.inCombat -> TrackId.COMBAT
@@ -465,6 +474,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         drawMapOverlay(c, g)
         c.restore()
         drawPanel(c, g)
+        drawLevelBanner(c, g)
         sheetHero?.let { drawSheet(c, it) }
         levelUpHero?.let { drawLevelUp(c, it) }
         if (inventoryOpen) drawInventory(c, g)
@@ -910,6 +920,12 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         y += lh * 0.9f
         drawFitText(c, "Features: ${hero.charClass.features}", r.left + pad, y, ls * 0.9f, width, cDim)
         y += lh * 0.9f
+        hero.xpForNextLevel?.let { nextXp ->
+            val preview = hero.levelGains(hero.level + 1).joinToString(", ") { it.substringBefore(':') }
+            drawFitText(c, "Level ${hero.level + 1} at $nextXp XP: +${hero.hpPerLevel} HP, $preview", r.left + pad, y, ls * 0.9f, width,
+                0xFF9CD0FF.toInt())
+            y += lh * 0.9f
+        }
         hero.subclass?.let { sub ->
             val unlocked = sub.features.filter { hero.level >= it.level }.joinToString(", ") { it.title }
             val next = sub.features.firstOrNull { hero.level < it.level }?.let { "  (next: ${it.title} at ${it.level})" } ?: ""
@@ -1268,6 +1284,67 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             }
             val b = RectF(card.left + p, card.bottom - p - h * 0.08f, card.right - p, card.bottom - p)
             button(c, b, "Become a ${sub.displayName}", active = true) { hero.chooseSubclass(sub) }
+        }
+    }
+
+    // =======================================================================
+    // Level-up celebration
+    // =======================================================================
+
+    private fun drawLevelBanner(c: Canvas, g: Game) {
+        val notice = levelBanners.firstOrNull() ?: return
+        val hero = g.party.getOrNull(notice.heroIndex) ?: return levelBanners.clear()
+        val duration = if (levelBanners.size > 1) 2600L else 3600L
+        val age = nowMs - bannerStart
+        if (paused) bannerStart = nowMs - minOf(age, 400L)
+        if (age > duration) {
+            levelBanners.removeFirst()
+            bannerStart = nowMs
+            return
+        }
+        val h = height.toFloat()
+        val fadeIn = (age / 250f).coerceIn(0f, 1f)
+        val fadeOut = ((duration - age) / 350f).coerceIn(0f, 1f)
+        val alpha = minOf(fadeIn, fadeOut)
+        val rise = (1f - fadeIn) * h * 0.05f
+        val bw = mapW * 0.62f
+        val lines = notice.gains.take(5)
+        val bh = h * (0.26f + 0.045f * lines.size)
+        val r = RectF(mapW / 2f - bw / 2, h * 0.16f + rise, mapW / 2f + bw / 2, h * 0.16f + rise + bh)
+
+        // Glowing gold frame that pulses as it appears.
+        val glow = 0.5f + 0.5f * sin(age / 120.0).toFloat()
+        fill.color = 0xE0140F1E.toInt()
+        fill.alpha = (225 * alpha).toInt()
+        c.drawRect(r, fill)
+        fill.alpha = 255
+        stroke.color = cGold
+        for (k in 0..2) {
+            stroke.strokeWidth = 4f + k * 3f
+            stroke.alpha = ((150 - k * 45) * alpha * (0.6f + 0.4f * glow)).toInt()
+            c.drawRect(r.left - k * 4, r.top - k * 4, r.right + k * 4, r.bottom + k * 4, stroke)
+        }
+        stroke.alpha = 255
+        hit(r) { levelBanners.removeFirst(); bannerStart = nowMs }
+
+        val pad = h * 0.025f
+        val s = h * 0.17f
+        val bob = sin(age / 160.0).toFloat() * h * 0.006f
+        if (alpha > 0.05f) heroSprite(c, hero, r.left + pad, r.top + pad + bob, s)
+        val tx = r.left + pad * 2 + s
+        val pop = 1f + 0.25f * (1f - minOf(1f, age / 300f))
+        fun fade(color: Int) = (color and 0xFFFFFF) or ((255 * alpha).toInt().coerceIn(0, 255) shl 24)
+        drawText(c, "LEVEL ${notice.level}!", tx, r.top + pad + h * 0.075f, h * 0.075f * pop, fade(cGold))
+        drawText(c, "${hero.name} the ${hero.subclass?.displayName ?: hero.charClass.displayName}", tx, r.top + pad + h * 0.125f,
+            h * 0.035f, fade(cText))
+        drawText(c, "+${notice.hpGain} max HP", tx, r.top + pad + h * 0.17f, h * 0.032f, fade(cHp))
+        var y = r.top + pad + s + h * 0.05f
+        for (line in lines) {
+            drawFitText(c, "✦ $line", r.left + pad, y, h * 0.03f, bw - pad * 2, fade(0xFFE8DCA8.toInt()))
+            y += h * 0.045f
+        }
+        if (hero.hasPendingChoices && !hero.dead) {
+            drawText(c, "Tap ▲ on ${hero.name}'s portrait to choose", r.centerX(), r.bottom - pad * 0.8f, h * 0.026f, fade(cDim), Paint.Align.CENTER)
         }
     }
 

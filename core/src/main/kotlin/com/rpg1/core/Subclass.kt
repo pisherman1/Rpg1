@@ -98,4 +98,6 @@ enum class Feature(val subclass: Subclass, val level: Int, val title: String, va
 enum class Resource(val shortRest: Boolean) {
     SMITE(false), LAY_ON_HANDS(false), ENVENOM(true), PRESERVE_LIFE(true),
     DESTRUCTIVE_WRATH(true), WRATH_OF_THE_STORM(false), OVERCHANNEL(false), ARCANE_RECOVERY(false),
+    /** Fighter's Indomitable (not a subclass feature, but tracked the same way). */
+    INDOMITABLE(false),
 }

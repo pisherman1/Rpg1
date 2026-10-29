@@ -59,15 +59,22 @@ that hero's character sheet.
   moving through (but not stopping on) allies' squares, diagonal moves cost 5 ft.
 - 0 HP: unconscious, death saves (nat 20 = back up, nat 1 = two failures), hits on a downed
   hero are failures (melee hits auto-crit), massive-damage instant death, stabilising.
-- XP split between living heroes, levels 1–10 with the 5e XP table, HP and spell-slot growth.
+- XP split between living heroes; levels 1–10 on a gentler curve than 5e (80 / 250 / 550 / 1000 /
+  1600 / 2350 / 3250 / 4300 / 5500 XP), about a level per dungeon floor. Every level brings something
+  new (features, spells, slots, Sneak Attack dice, ability score improvements), celebrated with a
+  banner; the character sheet previews the next level.
+- Casters start with one cantrip and one spell (Wizard: Fire Bolt, Magic Missile; Cleric: Sacred
+  Flame, Cure Wounds) and learn one more every level.
 - Races: Human, Dwarf, Elf, Halfling (Lucky rerolls natural 1s).
-- Classes: Fighter (Second Wind, Action Surge, Extra Attack at 5th), Rogue (Sneak Attack with
-  advantage or an adjacent ally, Aim, Cunning Action, Uncanny Dodge at 5th), Wizard and Cleric.
+- Classes: Fighter (Second Wind, Action Surge, Extra Attack at 5th, Indomitable at 9th, a third
+  attack at 10th), Rogue (Sneak Attack with advantage or an adjacent ally, Aim, Cunning Action,
+  Uncanny Dodge at 5th, Evasive at 6th), Wizard and Cleric.
 - Spells (a new one learned every level, gated by slot level; higher slots upcast them):
-  - Wizard: Fire Bolt, Ray of Frost, Magic Missile, Burning Hands, Sleep, Scorching Ray,
-    Shatter, Fireball.
+  - Wizard: Fire Bolt, Ray of Frost, Magic Missile, Burning Hands, Thunderwave, Sleep, Scorching
+    Ray, Shatter, Acid Arrow, Fireball, Lightning Bolt, Ice Storm, Cone of Cold.
   - Cleric: Sacred Flame, Toll the Dead, Guiding Bolt, Cure Wounds, Healing Word (bonus action),
-    Bless, Prayer of Healing, Mass Healing Word, Revivify (300 gold, brings back a fallen hero).
+    Inflict Wounds, Bless, Prayer of Healing, Spirit Guardians, Mass Healing Word, Revivify (300
+    gold, brings back a fallen hero), Flame Strike, Mass Cure Wounds.
 - Subclasses at 3rd level (adapted from D&D lore to the tactical grid):
   - Fighter: **Paladin** (Divine Smite, Lay on Hands, Aura of Protection) or **Knight**
     (Shield Wall, Knightly Challenge, Rallying Cry, Warding Maneuver).

@@ -89,12 +89,12 @@ class RulesTest {
         val hero = Hero.create("Elminster", Race.HUMAN, CharClass.WIZARD, listOf(16, 14, 13, 12, 10, 8))
         assertEquals(listOf(2), hero.spellSlots.toList())
         val startHp = hero.maxHp
-        val msgs = hero.gainXp(2700, Dice(Random(0)))
+        val msgs = hero.gainXp(Hero.XP_TABLE[3], Dice(Random(0)))
         assertEquals(3, msgs.size)
         assertEquals(4, hero.level)
         assertEquals(listOf(4, 3), hero.spellSlots.toList())
         assertEquals(startHp + 3 * (4 + 2), hero.maxHp) // fixed d6 gain 4 + CON +2 (14+1=15)
-        hero.gainXp(6500, Dice(Random(0)))
+        hero.gainXp(Hero.XP_TABLE[4] - hero.xp, Dice(Random(0)))
         assertEquals(3, hero.proficiency)
         assertEquals(2, hero.cantripDice)
     }
@@ -104,7 +104,7 @@ class RulesTest {
         val hero = Hero.create("Cleo", Race.HUMAN, CharClass.CLERIC, listOf(16, 14, 13, 12, 10, 8))
         hero.spendSlot(1)
         hero.spendSlot(1)
-        hero.gainXp(300, Dice(Random(0)))
+        hero.gainXp(Hero.XP_TABLE[1], Dice(Random(0)))
         assertEquals(listOf(1), hero.spellSlots.toList()) // gained the one new slot only
         hero.longRest()
         assertEquals(listOf(3), hero.spellSlots.toList())
