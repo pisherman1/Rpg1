@@ -34,7 +34,8 @@ dependencyResolutionManagement {
 rootProject.name = "Rpg1"
 
 include(":core")
-// The Android app needs the Android SDK; set -PcoreOnly=true to build/test just the rules engine.
+include(":render")
+// The Android app needs the Android SDK; set -PcoreOnly=true to build/test just core and render.
 if (providers.gradleProperty("coreOnly").orNull != "true") {
     include(":app")
 }

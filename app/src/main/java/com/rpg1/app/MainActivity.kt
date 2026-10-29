@@ -9,19 +9,35 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.EditText
+import android.widget.FrameLayout
+import com.rpg1.render.WorldFrame
 
 class MainActivity : Activity(), GameView.Host {
     private lateinit var gameView: GameView
+    private lateinit var worldView: WorldSurfaceView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         GameSession.init(this)
+        // The GL world renders underneath; the Canvas UI draws on top and leaves the map area clear.
+        worldView = WorldSurfaceView(this) { gameView.useCanvasWorld() }
         gameView = GameView(this, this)
-        setContentView(gameView)
+        setContentView(FrameLayout(this).apply {
+            addView(worldView)
+            addView(gameView)
+        })
+    }
+
+    override fun submitWorld(frame: WorldFrame?) = worldView.submit(frame)
+
+    override fun onResume() {
+        super.onResume()
+        worldView.onResume()
     }
 
     override fun onPause() {
         super.onPause()
+        worldView.onPause()
         GameSession.autosave()
     }
 

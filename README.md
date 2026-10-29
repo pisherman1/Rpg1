@@ -12,7 +12,7 @@ To build locally you need the Android SDK (API 35) and JDK 17:
 
 ```sh
 ./gradlew :app:assembleDebug                  # APK in app/build/outputs/apk/debug/
-./gradlew -PcoreOnly=true :core:test          # rules engine only, no Android SDK needed
+./gradlew -PcoreOnly=true :core:test :render:test   # no Android SDK needed
 ```
 
 ## Playing
@@ -71,10 +71,31 @@ HeroTemplate("Name", Race.ELF, CharClass.ROGUE, listOf(10, 15, 14, 12, 13, 8)),
 Scores are STR, DEX, CON, INT, WIS, CHA *before* racial bonuses; pass `null` (or leave the
 list out) to roll them when the premade is picked. A `PartyTemplate` takes exactly four heroes.
 
+## Graphics
+
+The dungeon is drawn with OpenGL ES 3.0 (required; every Android device since ~2014 has it):
+
+1. sprites render into an offscreen buffer at true pixel resolution (16 px per square);
+2. a light map gathers flickering torches carried by each hero, wall torches, stairs and spell
+   glows, with stepped falloff for a pixel-art look;
+3. the light map is applied with fog of war: what the party can see is lit, remembered areas
+   fade to a cold blue memory, with soft edges from a per-square visibility texture;
+4. projectiles and particles are drawn on top and glow, then bright areas are blurred into bloom;
+5. the image is scaled up pixel-perfectly with sub-pixel camera scrolling, colour grading and
+   a vignette.
+
+Creatures glide between squares, bob when idle, lunge when attacking, flash when hit and fade
+out when slain; crits shake the screen. Text and UI are drawn on top with Canvas so they stay
+crisp. If OpenGL fails on a device, the game falls back to plain Canvas drawing.
+
 ## Project layout
 
 - `core/` — pure Kotlin rules engine and pixel art (`art/Sprites.kt`, sprites as text), with
   unit tests including a bot that plays whole games.
-- `app/` — the Android frontend: a single Canvas-based `GameView` and `MainActivity`.
+- `render/` — pure Kotlin world renderer: animation, particles and lighting (`WorldAnimator`),
+  and the OpenGL pipeline (`WorldRenderer`) behind a small `Gl` interface, so it can also run
+  on desktop OpenGL.
+- `app/` — the Android frontend: `WorldSurfaceView` (GL), `GameView` (Canvas UI) and
+  `MainActivity`.
 
 Monster stat blocks are adapted from the D&D 5e System Reference Document 5.1 (CC BY 4.0).

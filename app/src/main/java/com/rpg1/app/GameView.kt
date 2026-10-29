@@ -12,6 +12,7 @@ import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import com.rpg1.core.Ability
+import com.rpg1.core.Creature
 import com.rpg1.core.CharClass
 import com.rpg1.core.Dungeon
 import com.rpg1.core.Fx
@@ -28,6 +29,8 @@ import com.rpg1.core.SpellTarget
 import com.rpg1.core.Tile
 import com.rpg1.core.art.Sprites
 import com.rpg1.core.formatModifier
+import com.rpg1.render.WorldAnimator
+import com.rpg1.render.WorldFrame
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -42,6 +45,9 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
     interface Host {
         fun askName(current: String, onResult: (String) -> Unit)
+
+        /** Hands the next world frame to the GL renderer (null to show nothing). */
+        fun submitWorld(frame: WorldFrame?)
     }
 
     private enum class Screen { PARTY, PLAY }
@@ -79,15 +85,16 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
     private var mapW = 0
     private var tilePx = 64
-    private var camX = 0f
-    private var camY = 0f
-    private var camReady = false
 
     // --- Timing & effects ---------------------------------------------------
     private var lastTick = 0L
     private var nowMs = 0L
-    private class LiveFx(val fx: Fx, val born: Long)
-    private val liveFx = mutableListOf<LiveFx>()
+    private var lastFrameMs = 0L
+
+    // --- World rendering ----------------------------------------------------
+    private val animator = WorldAnimator(Art.atlas)
+    /** Set if the GL renderer fails on this device; the map is then drawn with Canvas. */
+    private var canvasWorld = false
 
     private var logExpanded = false
     private var sheetHero: Hero? = null
@@ -120,8 +127,11 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
     override fun doFrame(frameTimeNanos: Long) {
         nowMs = frameTimeNanos / 1_000_000
-        game?.let { g ->
-            if (screen == Screen.PLAY && !menuOpen) {
+        val dt = if (lastFrameMs == 0L) 0f else (nowMs - lastFrameMs) / 1000f
+        lastFrameMs = nowMs
+        val g = game
+        if (screen == Screen.PLAY && g != null) {
+            if (!menuOpen) {
                 val interval = when {
                     g.phase == Phase.MONSTER_TURN -> 240L
                     g.inCombat -> 150L
@@ -132,12 +142,20 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
                     g.tick()
                 }
                 checkAutosave(g)
-                g.drainFx().forEach { liveFx += LiveFx(it, nowMs) }
-                liveFx.removeAll { nowMs - it.born > 1000 }
             }
+            animator.setViewport(mapW, height, tilePx / 16)
+            animator.update(g, g.drainFx(), if (menuOpen) 0f else dt)
+            host.submitWorld(if (canvasWorld) null else animator.buildFrame(g))
+        } else {
+            host.submitWorld(null)
         }
         invalidate()
         Choreographer.getInstance().postFrameCallback(this)
+    }
+
+    fun useCanvasWorld() {
+        canvasWorld = true
+        toast("Using basic graphics on this device")
     }
 
     private fun checkAutosave(g: Game) {
@@ -162,8 +180,6 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     private fun loadSlot(slot: Int) {
         try {
             GameSession.load(slot)
-            liveFx.clear()
-            camReady = false
             logExpanded = false
             sheetHero = null
             menuOpen = false
@@ -208,9 +224,7 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         }
         val g = game ?: return
         if (screen != Screen.PLAY || x >= mapW) return
-        val tx = Math.floorDiv((x - mapW / 2f + camX * tilePx).toInt(), tilePx)
-        val ty = Math.floorDiv((y - height / 2f + camY * tilePx).toInt(), tilePx)
-        g.tap(tx, ty)
+        g.tap(animator.screenToTileX(x), animator.screenToTileY(y))
     }
 
     private fun hit(rect: RectF, action: () -> Unit) {
@@ -228,7 +242,13 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
 
     override fun onDraw(canvas: Canvas) {
         hits.clear()
-        canvas.drawColor(cBg)
+        // In play the GL world shows through the map area; everything else gets a solid background.
+        if (screen == Screen.PLAY && !canvasWorld) {
+            fill.color = cBg
+            canvas.drawRect(mapW.toFloat(), 0f, width.toFloat(), height.toFloat(), fill)
+        } else {
+            canvas.drawColor(cBg)
+        }
         when (screen) {
             Screen.PARTY -> drawPartyScreen(canvas)
             Screen.PLAY -> game?.let { drawPlay(canvas, it) } ?: run { screen = Screen.PARTY }
@@ -395,8 +415,6 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         }
         button(c, slot(3), "Begin Adventure ▶", active = true) {
             GameSession.startGame()
-            liveFx.clear()
-            camReady = false
             logExpanded = false
             lastDepth = -1
             lastPhase = null
@@ -409,11 +427,11 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
     // =======================================================================
 
     private fun drawPlay(c: Canvas, g: Game) {
-        updateCamera(g)
         c.save()
         c.clipRect(0f, 0f, mapW.toFloat(), height.toFloat())
-        drawMap(c, g)
-        drawFx(c, g)
+        if (canvasWorld) drawCanvasWorld(c, g)
+        drawMapMarkers(c, g)
+        drawFloatTexts(c)
         drawMapOverlay(c, g)
         c.restore()
         drawPanel(c, g)
@@ -421,59 +439,71 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         if (g.phase == Phase.GAME_OVER) drawGameOver(c, g)
     }
 
-    private fun focusOf(g: Game): Pair<Int, Int> {
-        val cur = g.current
-        if (g.phase == Phase.MONSTER_TURN && cur is Monster && g.dungeon.isVisible(cur.x, cur.y)) return cur.x to cur.y
-        val h = g.activeHero ?: g.livingHeroes.firstOrNull() ?: g.party.first()
-        return h.x to h.y
+    private fun tileRect(x: Int, y: Int): RectF {
+        val l = animator.toScreenX(x * 16f)
+        val t = animator.toScreenY(y * 16f)
+        return RectF(l, t, l + tilePx, t + tilePx)
     }
 
-    private fun updateCamera(g: Game) {
-        val (fx, fy) = focusOf(g)
-        val tx = fx + 0.5f
-        val ty = fy + 0.5f
-        if (!camReady || abs(tx - camX) > 20 || abs(ty - camY) > 20) {
-            camX = tx; camY = ty; camReady = true
-        } else {
-            camX += (tx - camX) * 0.15f
-            camY += (ty - camY) * 0.15f
-        }
+    /** Where a creature is drawn right now (it glides between squares). */
+    private fun creatureRect(cr: Creature): RectF {
+        val l = animator.toScreenX(animator.displayX(cr))
+        val t = animator.toScreenY(animator.displayY(cr))
+        return RectF(l, t, l + tilePx, t + tilePx)
     }
 
-    private fun screenX(tx: Float) = mapW / 2f + (tx - camX) * tilePx
-    private fun screenY(ty: Float) = height / 2f + (ty - camY) * tilePx
-    private fun tileRect(x: Int, y: Int) = RectF(screenX(x.toFloat()), screenY(y.toFloat()),
-        screenX(x.toFloat()) + tilePx, screenY(y.toFloat()) + tilePx)
-
-    private fun drawMap(c: Canvas, g: Game) {
+    /** UI markers over the world: movement range, selection outlines, health bars. */
+    private fun drawMapMarkers(c: Canvas, g: Game) {
         val d = g.dungeon
-        val halfW = mapW / tilePx / 2 + 2
-        val halfH = height / tilePx / 2 + 2
-        val cx = camX.toInt()
-        val cy = camY.toInt()
-        val fog = 0xB0000000.toInt()
-        val floor = SpriteCache.get(Sprites.FLOOR)
-        val wall = SpriteCache.get(Sprites.WALL)
-        val stairs = SpriteCache.get(Sprites.STAIRS)
-
-        for (y in cy - halfH..cy + halfH) for (x in cx - halfW..cx + halfW) {
-            if (!d.isExplored(x, y)) continue
-            val r = tileRect(x, y)
-            c.drawBitmap(when (d[x, y]) {
-                Tile.WALL -> wall
-                Tile.FLOOR -> floor
-                Tile.STAIRS -> stairs
-            }, null, r, pixelPaint)
-        }
-
-        // Reachable squares for the active hero in combat.
         if (g.phase == Phase.PLAYER_TURN && g.movementLeft > 0 && g.armedSpell == null && !g.armedRanged && !g.armedPotion) {
             g.activeHero?.takeIf { !it.isUnconscious }?.let { h ->
                 fill.color = 0x302E7CF0
-                for ((p, _) in reachable(g, h)) c.drawRect(tileRect(p.first, p.second), fill)
+                stroke.color = 0x604A90FF
+                stroke.strokeWidth = 2f
+                for ((p, _) in reachable(g, h)) {
+                    val r = tileRect(p.first, p.second)
+                    c.drawRect(r, fill)
+                    c.drawRect(r.left + 1, r.top + 1, r.right - 1, r.bottom - 1, stroke)
+                }
             }
         }
+        val pulse = (0.5f + 0.5f * sin(nowMs / 180.0).toFloat())
+        val targeting = g.armedSpell != null || g.armedRanged
+        val active = g.activeHero
+        for (m in g.monsters) {
+            if (!d.isVisible(m.x, m.y)) continue
+            val r = creatureRect(m)
+            drawHpBar(c, r, m.hp, m.maxHp)
+            if (m === g.current) outline(c, r, 0xFFE04040.toInt(), pulse)
+            else if (targeting && active != null && inRangeOf(g, active, m)) outline(c, r, 0xFFFF7040.toInt(), pulse)
+        }
+        val allyTargeting = g.armedPotion || g.armedSpell?.target == SpellTarget.ALLY
+        for (h in g.livingHeroes) {
+            val r = creatureRect(h)
+            drawHpBar(c, r, h.hp, h.maxHp)
+            if (h === active) outline(c, r, cGold, pulse)
+            else if (allyTargeting) outline(c, r, 0xFF50E070.toInt(), pulse)
+            if (g.phase == Phase.EXPLORING && h === g.leader) {
+                drawText(c, "★", r.centerX(), r.top - tilePx * 0.02f, tilePx * 0.3f, cGold, Paint.Align.CENTER)
+            }
+        }
+    }
 
+    /** Basic Canvas rendering of the world, used only if OpenGL fails on the device. */
+    private fun drawCanvasWorld(c: Canvas, g: Game) {
+        val d = g.dungeon
+        val left = animator.screenToTileX(0f) - 1
+        val top = animator.screenToTileY(0f) - 1
+        val right = animator.screenToTileX(mapW.toFloat()) + 1
+        val bottom = animator.screenToTileY(height.toFloat()) + 1
+        for (y in top..bottom) for (x in left..right) {
+            if (!d.isExplored(x, y)) continue
+            c.drawBitmap(SpriteCache.get(when (d[x, y]) {
+                Tile.WALL -> if (d[x, y + 1].walkable) Sprites.WALL else Sprites.WALL_TOP
+                Tile.FLOOR -> Sprites.FLOOR
+                Tile.STAIRS -> Sprites.STAIRS
+            }), null, tileRect(x, y), pixelPaint)
+        }
         for (p in g.corpses) if (d.isExplored(p.x, p.y)) c.drawBitmap(SpriteCache.get(Sprites.BONES), null, tileRect(p.x, p.y), pixelPaint)
         for (p in g.graves) c.drawBitmap(SpriteCache.get(Sprites.GRAVE), null, tileRect(p.x, p.y), pixelPaint)
         for (item in d.items) {
@@ -485,44 +515,17 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
             }
             c.drawBitmap(SpriteCache.get(s), null, tileRect(item.x, item.y), pixelPaint)
         }
-
-        // Fog over remembered-but-unseen squares.
-        fill.color = fog
-        for (y in cy - halfH..cy + halfH) for (x in cx - halfW..cx + halfW) {
+        fill.color = 0xB0000000.toInt()
+        for (y in top..bottom) for (x in left..right) {
             if (d.isExplored(x, y) && !d.isVisible(x, y)) c.drawRect(tileRect(x, y), fill)
         }
-
-        val pulse = (0.5f + 0.5f * sin(nowMs / 180.0).toFloat())
-        val targeting = g.armedSpell != null || g.armedRanged
-        val active = g.activeHero
-
-        for (m in g.monsters) {
-            if (!d.isVisible(m.x, m.y)) continue
-            val r = tileRect(m.x, m.y)
-            c.drawBitmap(SpriteCache.monster(m.type), null, r, pixelPaint)
-            drawHpBar(c, r, m.hp, m.maxHp)
-            if (m === g.current) outline(c, r, 0xFFE04040.toInt(), pulse)
-            else if (targeting && active != null && inRangeOf(g, active, m)) outline(c, r, 0xFFFF7040.toInt(), pulse)
-            if (m.marked) drawText(c, "✦", r.right - tilePx * 0.15f, r.top + tilePx * 0.3f, tilePx * 0.3f, cGold, Paint.Align.CENTER)
-        }
-
-        val allyTargeting = g.armedPotion || g.armedSpell?.target == SpellTarget.ALLY
+        for (m in g.monsters) if (d.isVisible(m.x, m.y)) c.drawBitmap(SpriteCache.monster(m.type), null, creatureRect(m), pixelPaint)
         for (h in g.livingHeroes) {
-            val r = tileRect(h.x, h.y)
-            if (h.isUnconscious) {
-                c.save()
-                c.rotate(90f, r.centerX(), r.centerY())
-                heroSprite(c, h, r.left, r.top, tilePx.toFloat())
-                c.restore()
-            } else {
-                heroSprite(c, h, r.left, r.top, tilePx.toFloat())
-            }
-            drawHpBar(c, r, h.hp, h.maxHp)
-            if (h === active) outline(c, r, cGold, pulse)
-            else if (allyTargeting) outline(c, r, 0xFF50E070.toInt(), pulse)
-            if (g.phase == Phase.EXPLORING && h === g.leader) {
-                drawText(c, "★", r.centerX(), r.top + tilePx * 0.05f, tilePx * 0.3f, cGold, Paint.Align.CENTER)
-            }
+            val r = creatureRect(h)
+            c.save()
+            if (h.isUnconscious) c.rotate(90f, r.centerX(), r.centerY())
+            heroSprite(c, h, r.left, r.top, tilePx.toFloat())
+            c.restore()
         }
     }
 
@@ -575,60 +578,27 @@ class GameView(context: Context, private val host: Host) : View(context), Choreo
         c.drawRect(r.left + tilePx * 0.1f, top, r.left + tilePx * 0.1f + (r.width() - tilePx * 0.2f) * frac, top + h, fill)
     }
 
-    private fun fxColor(kind: FxKind) = when (kind) {
-        FxKind.DAMAGE -> 0xFFFF5050.toInt()
-        FxKind.CRIT -> 0xFFFFD040.toInt()
-        FxKind.HEAL -> 0xFF60F080.toInt()
-        FxKind.MISS -> 0xFFB0B0C0.toInt()
-        FxKind.FIRE -> 0xFFFF8A20.toInt()
-        FxKind.RADIANT -> 0xFFFFF0A0.toInt()
-        FxKind.FORCE -> 0xFFB070FF.toInt()
-        FxKind.ARROW -> 0xFFD8C8A0.toInt()
-        FxKind.INFO -> cGold
-    }
+    private fun fxColor(kind: FxKind) = 0xFF000000.toInt() or WorldAnimator.colorOf(kind)
 
-    private fun drawFx(c: Canvas, g: Game) {
-        for (live in liveFx) {
-            val age = (nowMs - live.born).coerceAtLeast(0)
-            when (val fx = live.fx) {
-                is Fx.Bolt -> {
-                    if (age > 320) continue
-                    val t = age / 320f
-                    val sx = screenX(fx.fromX + 0.5f)
-                    val sy = screenY(fx.fromY + 0.5f)
-                    val ex = screenX(fx.toX + 0.5f)
-                    val ey = screenY(fx.toY + 0.5f)
-                    val px = sx + (ex - sx) * t
-                    val py = sy + (ey - sy) * t
-                    fill.color = fxColor(fx.kind)
-                    val s = tilePx * if (fx.kind == FxKind.ARROW) 0.08f else 0.16f
-                    c.drawRect(px - s, py - s, px + s, py + s, fill)
-                    fill.alpha = 120
-                    val tx = sx + (ex - sx) * max(0f, t - 0.15f)
-                    val ty = sy + (ey - sy) * max(0f, t - 0.15f)
-                    c.drawRect(tx - s * 0.6f, ty - s * 0.6f, tx + s * 0.6f, ty + s * 0.6f, fill)
-                    fill.alpha = 255
-                }
-                is Fx.Text -> {
-                    // Wait for the projectile to land before showing the number.
-                    val delayed = age - 220
-                    if (delayed < 0) continue
-                    val t = delayed / 780f
-                    val alpha = ((1f - t) * 255).toInt().coerceIn(0, 255)
-                    val x = screenX(fx.x + 0.5f)
-                    val y = screenY(fx.y + 0.2f) - t * tilePx * 0.8f
-                    val size = tilePx * if (fx.kind == FxKind.CRIT) 0.5f else 0.38f
-                    text.textSize = size
-                    text.textAlign = Paint.Align.CENTER
-                    text.color = Color.BLACK
-                    text.alpha = alpha
-                    c.drawText(fx.text, x + 2, y + 2, text)
-                    text.color = fxColor(fx.kind)
-                    text.alpha = alpha
-                    c.drawText(fx.text, x, y, text)
-                    text.alpha = 255
-                }
-            }
+    /** Damage numbers and other combat text, rising and fading above the world. */
+    private fun drawFloatTexts(c: Canvas) {
+        for (ft in animator.floatTexts) {
+            if (ft.age < 0f) continue
+            val t = (ft.age / 0.9f).coerceIn(0f, 1f)
+            val alpha = ((1f - t * t) * 255).toInt().coerceIn(0, 255)
+            val x = animator.toScreenX(ft.x)
+            val y = animator.toScreenY(ft.y) - t * tilePx * 0.8f
+            // Crits pop in larger.
+            val pop = if (ft.kind == FxKind.CRIT) 0.5f + 0.25f * (1f - minOf(1f, t * 4f)) else 0.38f
+            text.textSize = tilePx * pop
+            text.textAlign = Paint.Align.CENTER
+            text.color = Color.BLACK
+            text.alpha = alpha
+            c.drawText(ft.text, x + 3, y + 3, text)
+            text.color = fxColor(ft.kind)
+            text.alpha = alpha
+            c.drawText(ft.text, x, y, text)
+            text.alpha = 255
         }
     }
 
