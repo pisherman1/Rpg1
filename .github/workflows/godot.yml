@@ -98,5 +98,4 @@ jobs:
           sudo apt-get install -y -qq xvfb mesa-utils libgl1-mesa-dri libegl1 > /dev/null
           xvfb-run -s "-screen 0 1600x720x24" glxinfo -B | head -12 || true
           xvfb-run -s "-screen 0 1600x720x24" ./godot-bin --path godot --rendering-driver opengl3 --resolution 1600x720 --script res://tests/screenshot.gd 2>&1 > shots.log 2>&1 || true
-          grep -v -E "^[A-Za-z0-9+/=]{200,}$" shots.log | head -40
-          grep -E "SHOT|^[A-Za-z0-9+/=]{200,}$" shots.log | head -c 120000
+          grep -E "SHOT|ui size|tap:|SCRIPT ERROR|at: res" shots.log | head -60

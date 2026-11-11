@@ -22,10 +22,7 @@ func _shot(label: String, then_quit: bool = false) -> void:
 	print("ui size=%s pos=%s hits=%d visible=%s world=%s" % [ui.size, ui.global_position, ui._hits.size(), ui.is_visible_in_tree(), ui.world.size])
 	print("renderer=%s size=%s game=%s" % [RenderingServer.get_video_adapter_name(), root.size, Session.game != null])
 	var img := root.get_texture().get_image()
-	img.resize(img.get_width() * 2 / 5, img.get_height() * 2 / 5, Image.INTERPOLATE_BILINEAR)
-	print("SHOT-BEGIN %s" % label)
-	print(Marshalls.raw_to_base64(img.save_jpg_to_buffer(0.55)))
-	print("SHOT-END")
+	print("SHOT %s: %s" % [label, _stats(img)])
 	if then_quit:
 		quit(0)
 
@@ -53,3 +50,23 @@ func _process(_delta: float) -> bool:
 		_done = true
 		_shot("final", true)
 	return false
+
+
+## Mean brightness and number of distinct colours for the map area and the side panel.
+func _stats(img: Image) -> String:
+	var out := []
+	var w := img.get_width()
+	var h := img.get_height()
+	for region in [["map", Rect2i(0, 0, int(w * 0.66), h)], ["panel", Rect2i(int(w * 0.66), 0, w - int(w * 0.66), h)]]:
+		var r: Rect2i = region[1]
+		var total := 0.0
+		var colors := {}
+		var n := 0
+		for y in range(r.position.y, r.end.y, 6):
+			for x in range(r.position.x, r.end.x, 6):
+				var c := img.get_pixel(x, y)
+				total += c.get_luminance()
+				colors[c.to_rgba32() >> 12] = true
+				n += 1
+		out.append("%s lum=%.3f colors=%d" % [region[0], total / maxi(1, n), colors.size()])
+	return ", ".join(out)
