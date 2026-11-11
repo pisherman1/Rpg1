@@ -49,6 +49,9 @@ func _process(_delta: float) -> bool:
 	if _frame == 3:
 		# Press "Begin Adventure" via the hit regions the party screen drew.
 		ui._handle_tap(Vector2(ui.size.x * 0.85, ui.size.y * 0.92))
+		# The headless renderer never calls _draw(), so there may be no hit regions to tap.
+		if Session.game == null:
+			ui._begin_adventure()
 	elif _frame > 3 and Session.game != null:
 		var g: Game = Session.game
 		# Headless frames run faster than real time, so advance the game every frame too.
