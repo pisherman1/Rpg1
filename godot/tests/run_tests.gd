@@ -64,6 +64,8 @@ func _process(_delta: float) -> bool:
 		elif _frame % 100 == 10:
 			ui.handle_back()
 	if _frame >= UI_FRAMES:
+		if ui.size.x < 100 or ui.size.y < 100:
+			fail("UI has no size: %s" % ui.size)
 		if Session.game == null:
 			fail("Begin Adventure did not start a game")
 		elif ui.screen != GameUI.Screen.PLAY:

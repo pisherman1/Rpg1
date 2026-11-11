@@ -17,6 +17,17 @@ func _ready() -> void:
 	ui.world = world
 	ui.audio = audio
 	root.add_child(ui)
+	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# The root Control's parent is a plain Node, so size it to the window ourselves.
+	get_viewport().size_changed.connect(_fit_to_window)
+	_fit_to_window()
+
+
+func _fit_to_window() -> void:
+	var root: Control = ui.get_parent()
+	root.position = Vector2.ZERO
+	root.size = get_viewport().get_visible_rect().size
+	ui.size = root.size
 
 
 func _notification(what: int) -> void:
