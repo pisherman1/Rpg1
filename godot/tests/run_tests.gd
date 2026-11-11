@@ -4,6 +4,10 @@ extends SceneTree
 
 const SUITES := [
 	"res://tests/test_smoke.gd",
+	"res://tests/test_rules.gd",
+	"res://tests/test_dungeon.gd",
+	"res://tests/test_game.gd",
+	"res://tests/test_save.gd",
 ]
 
 var failures: Array[String] = []

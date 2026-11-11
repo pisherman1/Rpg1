@@ -104,8 +104,8 @@ func is_caster() -> bool:
 ## Effective scores: base scores, raised by items such as an Amulet of Health.
 func abilities() -> Dictionary:
 	var out := base_abilities.duplicate()
-	for item in equipment.values():
-		var s := Items.sets_ability(item)
+	for eq in equipment.values():
+		var s := Items.sets_ability(eq)
 		if not s.is_empty():
 			out[s[0]] = maxi(out[s[0]], s[1])
 	return out
