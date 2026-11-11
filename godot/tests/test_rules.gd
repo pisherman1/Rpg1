@@ -153,3 +153,18 @@ func test_items_describe_themselves() -> void:
 	for i in 200:
 		var it := Items.random_item(dice, 1 + i % 8, i % 5 == 0)
 		check(Rules.ITEM_TYPES.has(it["type"]))
+
+
+func test_generated_tables_are_consistent() -> void:
+	for f in Rules.FEATURES:
+		var feat: Dictionary = Rules.FEATURES[f]
+		check(feat.get("subclass") is String and Rules.SUBCLASSES.has(feat["subclass"]), "feature %s has a bad subclass" % f)
+		check(feat.get("level") is int and feat.get("title") is String, "feature %s is incomplete" % f)
+	for sub in Rules.SUBCLASSES:
+		check(Rules.features_of(sub).size() >= 3, "%s has too few features" % sub)
+	check_eq(Rules.FEATURES["DESTRUCTIVE_WRATH"]["subclass"], "TEMPEST")
+	var tempest := Hero.with_scores("Storm", "HUMAN", "CLERIC", [10, 10, 14, 10, 16, 10])
+	tempest.gain_xp(Rules.XP_TABLE[2])
+	check(tempest.choose_subclass("TEMPEST"))
+	check(tempest.has_feature("DESTRUCTIVE_WRATH"))
+	check_eq(tempest.uses("DESTRUCTIVE_WRATH"), 1)

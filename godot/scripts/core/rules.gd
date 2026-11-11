@@ -983,19 +983,16 @@ const FEATURES := {
 		"text": "Reaction: when a foe hits you in melee, it makes a DEX save or takes 2d8 lightning (half on a save). WIS times per long rest.",
 	},
 	"DESTRUCTIVE_WRATH": {
-		"subclass": true,
+		"subclass": "TEMPEST",
+		"level": 3,
+		"title": "Destructive Wrath",
+		"text": "Ready it: your next lightning or thunder damage roll is maximised. 1 per short rest. You know Thunderwave, and Call Lightning at 5th.",
 	},
 	"DIVINE_STRIKE": {
 		"subclass": "TEMPEST",
 		"level": 7,
 		"title": "Divine Strike",
 		"text": "Once per turn, your weapon hits deal +1d8 thunder.",
-	},
-	"SMITE": {
-		"subclass": false,
-	},
-	"INDOMITABLE": {
-		"subclass": false,
 	},
 }
 
