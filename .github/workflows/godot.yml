@@ -31,8 +31,24 @@ jobs:
       - name: Import project
         run: ./godot-bin --headless --path godot --import
 
+      - name: Check scripts
+        run: |
+          status=0
+          for f in $(cd godot && find scripts tests -name '*.gd' | sort); do
+            out=$(./godot-bin --headless --path godot --check-only --script "res://$f" 2>&1) || { status=1; echo "== $f"; echo "$out" | grep -v '^Godot Engine' | head -20; }
+          done
+          exit $status
+
       - name: Run tests
-        run: ./godot-bin --headless --path godot --script res://tests/run_tests.gd
+        run: |
+          set -o pipefail
+          ./godot-bin --headless --path godot --script res://tests/run_tests.gd 2>&1 | tee test.log || {
+            echo "::group::Distinct errors"
+            grep -E "ERROR|at: " test.log | sed 's/^ *//' | sort | uniq -c | sort -rn | head -60
+            echo "::endgroup::"
+            grep -E "^(PASS|FAIL) " test.log
+            exit 1
+          }
 
       - name: Cache export templates
         id: templates
