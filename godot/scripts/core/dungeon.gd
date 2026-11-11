@@ -158,8 +158,8 @@ func find_path(sx: int, sy: int, gx: int, gy: int, blocked: Callable = Callable(
 			if d.x != 0 and d.y != 0 and (not is_walkable(cx + d.x, cy) or not is_walkable(cx, cy + d.y)):
 				continue
 			var is_goal := nx == gx and ny == gy
-			var is_blocked := has_blocked and blocked.call(nx, ny)
-			var reached := (Creature.chebyshev(nx, ny, gx, gy) == 1 and not is_blocked) if stop_adjacent else is_goal
+			var is_blocked: bool = has_blocked and blocked.call(nx, ny)
+			var reached: bool = (Creature.chebyshev(nx, ny, gx, gy) == 1 and not is_blocked) if stop_adjacent else is_goal
 			if not is_goal and is_blocked:
 				continue
 			if stop_adjacent and is_goal:
