@@ -8,7 +8,6 @@ func _ready() -> void:
 	var audio := GameAudio.new()
 	add_child(audio)
 	var root := Control.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 	var world := WorldView.new()
@@ -17,7 +16,6 @@ func _ready() -> void:
 	ui.world = world
 	ui.audio = audio
 	root.add_child(ui)
-	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# The root Control's parent is a plain Node, so size it to the window ourselves.
 	get_viewport().size_changed.connect(_fit_to_window)
 	_fit_to_window()
