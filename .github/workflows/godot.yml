@@ -66,7 +66,7 @@ jobs:
           export/android/debug_keystore_user = "androiddebugkey"
           export/android/debug_keystore_pass = "android"
           SETTINGS
-          ./godot-bin --headless --path godot --export-debug "Android" build/dungeon-delver-2.apk
+          ./godot-bin --headless --verbose --path godot --export-debug "Android" build/dungeon-delver-2.apk
           ls -la godot/build
 
       - uses: actions/upload-artifact@v4
