@@ -50,6 +50,13 @@ jobs:
             exit 1
           }
 
+      - name: Screenshots (software OpenGL)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          sudo apt-get install -y -qq xvfb mesa-utils > /dev/null
+          xvfb-run -s "-screen 0 1600x720x24" ./godot-bin --path godot --rendering-driver opengl3 --resolution 1600x720 --script res://tests/screenshot.gd 2>&1 | grep -v "^Godot Engine" | tail -c 400000
+
       - name: Cache export templates
         id: templates
         uses: actions/cache@v4
