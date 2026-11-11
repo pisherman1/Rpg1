@@ -17,9 +17,9 @@ func _initialize() -> void:
 
 func _shot(label: String) -> void:
 	var img := root.get_texture().get_image()
-	img.resize(img.get_width() / 2, img.get_height() / 2, Image.INTERPOLATE_BILINEAR)
+	img.resize(img.get_width() * 2 / 5, img.get_height() * 2 / 5, Image.INTERPOLATE_BILINEAR)
 	print("SHOT-BEGIN %s" % label)
-	print(Marshalls.raw_to_base64(img.save_jpg_to_buffer(0.6)))
+	print(Marshalls.raw_to_base64(img.save_jpg_to_buffer(0.55)))
 	print("SHOT-END")
 
 
