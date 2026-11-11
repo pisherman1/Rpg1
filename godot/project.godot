@@ -16,6 +16,7 @@ config/version="2.0.0"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.png"
+config/quit_on_go_back=false
 
 [display]
 
