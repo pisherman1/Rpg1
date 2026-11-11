@@ -524,7 +524,7 @@ func _draw_map_markers(g: Game) -> void:
 			_text("⚔", r.position.x + tile_px * 0.15, r.position.y + tile_px * 0.3, tile_px * 0.28, C_GOLD, 0)
 		if m.hunted_by != null:
 			_text("◎", r.end.x - tile_px * 0.15, r.end.y - tile_px * 0.08, tile_px * 0.28, Color("8ae0ff"), 0)
-	var ally_targeting := g.armed_potion or g.armed_feature == "LAY_ON_HANDS" or \
+	var ally_targeting: bool = g.armed_potion or g.armed_feature == "LAY_ON_HANDS" or \
 		(g.armed_spell != "" and Rules.SPELLS[g.armed_spell]["target"] == "ALLY")
 	for h in g.living_heroes():
 		var r := _creature_rect(h)
@@ -819,7 +819,7 @@ func _draw_sheet(hero: Hero) -> void:
 	var y := r.position.y + pad + h * 0.05
 	_text(hero.name, tx, y, h * 0.06, C_GOLD)
 	y += h * 0.05
-	var sub := (" · " + Rules.SUBCLASSES[hero.subclass]["display_name"]) if hero.subclass != "" else ""
+	var sub: String = (" · " + Rules.SUBCLASSES[hero.subclass]["display_name"]) if hero.subclass != "" else ""
 	_text("Level %d %s %s%s" % [hero.level, hero.race_info()["display_name"], cls["display_name"], sub], tx, y, h * 0.035, C_TEXT)
 	y += h * 0.045
 	var next_xp := hero.xp_for_next_level()
@@ -955,7 +955,7 @@ func _draw_menu() -> void:
 		_button(load_r, "Load", func(): _load_slot(slot), info != null)
 		if can_save and slot != Session.AUTOSAVE:
 			var save_r := _r(load_r.position.x - pad - bw, load_r.position.y, load_r.position.x - pad, load_r.end.y)
-			var confirming := _pending_overwrite == slot
+			var confirming: bool = _pending_overwrite == slot
 			_button(save_r, "Overwrite?" if confirming else "Save", func():
 				if info != null and not confirming:
 					_pending_overwrite = slot
