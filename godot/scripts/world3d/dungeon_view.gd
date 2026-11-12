@@ -28,6 +28,7 @@ var _floor_tiles: Array[Vector2i] = []
 var _wall_tiles: Array[Vector2i] = []
 var _low_wall_tiles: Array[Vector2i] = []
 var _torches: Array = []  # [tile, light, flame node]
+var _decor_nodes: Array = []  # [tile, node]
 var _stairs_light: OmniLight3D
 var _built_for: Dungeon = null
 var _last_vis := PackedByteArray()
@@ -39,6 +40,7 @@ var _props := {}    # key -> Node3D
 var _proj_pool: Array = []
 var _pulse_pool: Array[OmniLight3D] = []
 var _sparks: MultiMeshInstance3D
+var _dust: GPUParticles3D
 var _reach: MultiMeshInstance3D
 var _time := 0.0
 
@@ -103,6 +105,39 @@ func _ready() -> void:
 	_reach.material_override = reach_mat
 	_reach.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_reach)
+
+	# Dust motes drifting through the torchlight around the camera's focus.
+	_dust = GPUParticles3D.new()
+	_dust.amount = 90
+	_dust.lifetime = 9.0
+	_dust.preprocess = 9.0
+	_dust.visibility_aabb = AABB(Vector3(-8, -1, -8), Vector3(16, 4, 16))
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(6, 0.8, 5)
+	pm.gravity = Vector3(0, 0.01, 0)
+	pm.initial_velocity_min = 0.02
+	pm.initial_velocity_max = 0.08
+	pm.direction = Vector3(1, 0.2, 0.3)
+	pm.spread = 180.0
+	pm.turbulence_enabled = true
+	pm.turbulence_noise_strength = 0.4
+	pm.scale_min = 0.6
+	pm.scale_max = 1.4
+	var fade := Gradient.new()
+	fade.set_color(0, Color(1, 0.85, 0.6, 0))
+	fade.add_point(0.3, Color(1, 0.85, 0.6, 0.35))
+	fade.add_point(0.7, Color(1, 0.85, 0.6, 0.35))
+	fade.set_color(fade.get_point_count() - 1, Color(1, 0.85, 0.6, 0))
+	var ramp := GradientTexture1D.new()
+	ramp.gradient = fade
+	pm.color_ramp = ramp
+	_dust.process_material = pm
+	var mote := QuadMesh.new()
+	mote.size = Vector2(0.025, 0.025)
+	mote.material = Mats.spark()
+	_dust.draw_pass_1 = mote
+	add_child(_dust)
 
 	for c in [["gold", Color(1.0, 0.8, 0.25)], ["red", Color(1.0, 0.25, 0.2)], ["orange", Color(1.0, 0.5, 0.2)],
 			["green", Color(0.35, 1.0, 0.5)]]:
@@ -176,6 +211,8 @@ func _update_camera(vp: Vector2) -> void:
 	var pitch := deg_to_rad(CAM_PITCH)
 	var back := Vector3(0, sin(pitch), cos(pitch)) * CAM_DIST
 	camera.position = focus + back + shake
+	if _dust != null:
+		_dust.position = focus + Vector3(0, 0.9, 0)
 	camera.look_at(focus + shake, Vector3.UP)
 	# Centre the focus in the map area rather than the whole screen.
 	var aspect := vp.x / maxf(1.0, vp.y)
@@ -230,6 +267,7 @@ func _build_level(d: Dungeon) -> void:
 	_caps = _tile_multimesh(_wall_tiles, Figure.box(Vector3(1.02, 0.08, 1.02)), Mats.textured("rock", 0.6, 1.0, true), WALL_H + 0.04)
 	_build_stairs(d)
 	_build_torches()
+	_build_decor(d)
 
 
 func _tile_multimesh(tiles: Array[Vector2i], mesh: Mesh, mat: Material, y: float) -> MultiMeshInstance3D:
@@ -294,6 +332,58 @@ func _build_torches() -> void:
 		_torches.append([t, light, flame, n])
 
 
+## Non-blocking dressing: banners and chains on the back walls, debris on the floor.
+func _build_decor(d: Dungeon) -> void:
+	var banner_colors := [Color(0.55, 0.1, 0.1), Color(0.12, 0.2, 0.5), Color(0.15, 0.35, 0.18), Color(0.4, 0.15, 0.45)]
+	var torch_tiles := {}
+	for t in animator._torches:
+		torch_tiles[t] = true
+	var decor := Node3D.new()
+	decor.name = "Decor"
+	_level.add_child(decor)
+	_decor_nodes.clear()
+	for t in _wall_tiles:
+		if torch_tiles.has(t) or not d.is_walkable(t.x, t.y + 1):
+			continue
+		var h := WorldAnimator.tile_hash(t.x * 3 + 1, t.y * 7 + 2)
+		var n := Node3D.new()
+		n.position = Vector3(t.x + 0.5, 0, t.y + 1.0)
+		if h % 9 == 0:
+			# Hanging banner with a gold rod
+			var col: Color = banner_colors[h % banner_colors.size()]
+			Models._mesh(n, Figure.cylinder(0.015, 0.015, 0.5, 6), Models.metal(Models.GOLD), Vector3(0, 1.12, 0.03), Vector3(0, 0, 90))
+			Models._mesh(n, Figure.box(Vector3(0.38, 0.62, 0.015)), Mats.solid(col, 0.95), Vector3(0, 0.8, 0.03))
+			Models._mesh(n, Figure.cone(0.19, 0.12, 3), Mats.solid(col, 0.95), Vector3(0, 0.44, 0.03), Vector3(180, 0, 0), Vector3(1, 1, 0.08))
+			Models._mesh(n, Figure.sphere(0.05, 8), Mats.solid(Models.GOLD, 0.4, 0.6), Vector3(0, 0.86, 0.045), Vector3.ZERO, Vector3(1, 1, 0.3))
+		elif h % 9 == 4:
+			# Shackles and chains
+			for x in [-0.15, 0.15]:
+				for i in 4:
+					Models._mesh(n, Figure.cylinder(0.025, 0.025, 0.012, 8), Models.metal(Models.IRON), Vector3(x, 0.95 - i * 0.07, 0.02), Vector3(0, 90 * (i % 2), 90 * ((i + 1) % 2)))
+		else:
+			n.free()
+			continue
+		decor.add_child(n)
+		_decor_nodes.append([t, n])
+	var bone := Models.s(Models.BONE, 0.7)
+	var pebble := Mats.textured("rock", 2.0, 1.0)
+	for t in _floor_tiles:
+		var h := WorldAnimator.tile_hash(t.x * 5 + 3, t.y * 11 + 1)
+		if h % 7 != 0:
+			continue
+		var n := Node3D.new()
+		n.position = Vector3(t.x + 0.2 + (h % 60) / 100.0, 0, t.y + 0.2 + (h / 60 % 60) / 100.0)
+		n.rotation.y = (h % 628) / 100.0
+		if h % 3 == 0:
+			Models._mesh(n, Figure.capsule(0.012, 0.16), bone, Vector3(0, 0.012, 0), Vector3(90, 0, 0))
+			Models._mesh(n, Figure.capsule(0.012, 0.12), bone, Vector3(0.05, 0.012, 0.03), Vector3(90, 50, 0))
+		else:
+			for i in 3:
+				Models._mesh(n, Figure.sphere(0.03 + i * 0.012, 5), pebble, Vector3(i * 0.06 - 0.06, 0.01, (i % 2) * 0.05), Vector3.ZERO, Vector3(1, 0.5, 1))
+		decor.add_child(n)
+		_decor_nodes.append([t, n])
+
+
 func _update_fog() -> void:
 	var d := game.dungeon
 	if d.visible == _last_vis and d.explored == _last_explored:
@@ -314,6 +404,8 @@ func _update_fog() -> void:
 			mm.set_instance_color(i, c)
 			var scale := Vector3.ONE if known else Vector3.ZERO
 			mm.set_instance_transform(i, Transform3D(Basis.from_scale(scale), Vector3(t.x + 0.5, layer[2], t.y + 0.5)))
+	for dn in _decor_nodes:
+		dn[1].visible = d.is_explored(dn[0].x, dn[0].y)
 	var stairs := _level.get_node_or_null("Stairs")
 	if stairs != null:
 		stairs.visible = d.is_explored(d.stairs.x, d.stairs.y)
