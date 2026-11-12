@@ -7,8 +7,8 @@ extends Node3D
 const WALL_H := 1.25
 const LOW_WALL_H := 0.32
 const PX := 16.0
-const CAM_DIST := 7.0
-const CAM_PITCH := 58.0
+const CAM_DIST := 7.6
+const CAM_PITCH := 50.0
 const FOG_MEMORY := Color(0.24, 0.27, 0.4)
 const MAX_SHADOW_TORCHES := 4
 

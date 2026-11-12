@@ -69,6 +69,13 @@ func _init(file: String, height: float, width: float = 1.0, hide: Array = []) ->
 var _rig_height := 1.0
 
 
+func _ready() -> void:
+	# Start posed (not in the bind T-pose), even for one-frame portrait renders.
+	if player != null and player.has_animation(idle_anim):
+		player.play(idle_anim, 0.0)
+		player.seek(0.0, true)
+
+
 ## Height in metres (portrait framing and overlays use this).
 func model_height() -> float:
 	return _rig_height

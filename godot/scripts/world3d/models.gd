@@ -132,8 +132,8 @@ static func _race_parts(f: ModelFigure, race: String, female: bool, cls: String)
 				Vector3(c.x, c.y - hs.y * 0.08, c.z + hs.z * 0.5), Vector3(90, 0, 0))
 			f.bone_part("head", Figure.sphere(hs.x * 0.06, 8), s(Color(0.05, 0.05, 0.05), 0.3),
 				Vector3(c.x, c.y - hs.y * 0.08, c.z + hs.z * 0.73))
-			f.bone_part("head", Figure.box(Vector3(hs.x * 0.7, hs.y * 0.12, hs.z * 0.05)), white,
-				Vector3(c.x, c.y - hs.y * 0.22, c.z + hs.z * 0.47))
+			f.bone_part("head", Figure.sphere(hs.x * 0.16, 10), white,
+				Vector3(c.x, c.y - hs.y * 0.18, c.z + hs.z * 0.4), Vector3.ZERO, Vector3(1.2, 0.6, 1.0))
 			if not (cls == "WIZARD" or (cls == "FIGHTER" and not female) or (cls == "ROGUE" and not female)):
 				for side in [-1, 1]:
 					f.bone_part("head", Figure.cone(hs.x * 0.14, hs.y * 0.38, 6), fox,
@@ -228,8 +228,8 @@ static func _snout(f: ModelFigure, color: Color) -> void:
 	var hb := f.head_box()
 	var c := hb.get_center()
 	var hs := hb.size
-	f.bone_part("head", Figure.box(Vector3(hs.x * 0.4, hs.y * 0.28, hs.z * 0.45)), s(color, 0.8),
-		Vector3(c.x, c.y - hs.y * 0.12, c.z + hs.z * 0.58))
+	f.bone_part("head", Figure.capsule(hs.x * 0.15, hs.z * 0.55), s(color, 0.8),
+		Vector3(c.x, c.y - hs.y * 0.12, c.z + hs.z * 0.55), Vector3(90, 0, 0), Vector3(1.0, 1.0, 0.8))
 	f.bone_part("head", Figure.sphere(hs.x * 0.07, 8), s(Color(0.06, 0.05, 0.05), 0.3),
 		Vector3(c.x, c.y - hs.y * 0.05, c.z + hs.z * 0.82))
 
