@@ -8,6 +8,7 @@ const TURNTABLE_SIZE := Vector2i(320, 400)
 
 var _stills := {}      # key -> SubViewport
 var _turntables := {}  # slot -> {"vp", "fig", "key", "angle"}
+var _pending := {}     # still viewport -> frames to wait before rendering
 
 
 func hero_texture(race: String, cls: String, gender: String) -> Texture2D:
@@ -57,6 +58,11 @@ func set_turntables_active(active: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	for vp in _pending.keys():
+		_pending[vp] -= 1
+		if _pending[vp] <= 0:
+			_pending.erase(vp)
+			vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	for t in _turntables.values():
 		if t["fig"] == null or t["vp"].render_target_update_mode == SubViewport.UPDATE_DISABLED:
 			continue
@@ -71,7 +77,9 @@ func _make_still(fig: Figure, height: float) -> SubViewport:
 	fig.rotation.y = 0.45
 	fig.animate(0.0, false, Vector3.ZERO, 0.0, false)
 	vp.add_child(fig)
-	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	# Render once, a couple of frames from now, after the idle animation has posed the model.
+	vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_pending[vp] = 3
 	return vp
 
 
