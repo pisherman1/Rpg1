@@ -13,6 +13,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -91,11 +93,19 @@ jobs:
           path: godot/build/dungeon-delver-2.apk
           if-no-files-found: error
 
-      - name: Screenshots (software OpenGL)
+      - name: Screenshots (software Vulkan)
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          sudo apt-get install -y -qq xvfb mesa-utils libgl1-mesa-dri libegl1 > /dev/null
-          xvfb-run -s "-screen 0 1600x720x24" glxinfo -B | head -12 || true
-          xvfb-run -s "-screen 0 1600x720x24" ./godot-bin --path godot --rendering-driver opengl3 --resolution 1600x720 --script res://tests/screenshot.gd 2>&1 > shots.log 2>&1 || true
-          grep -E "SHOT|ui size|tap:|SCRIPT ERROR|at: res" shots.log | head -60
+          sudo apt-get install -y -qq xvfb mesa-vulkan-drivers libvulkan1 > /dev/null
+          mkdir -p shots
+          xvfb-run -s "-screen 0 1600x720x24" ./godot-bin --path godot --rendering-driver vulkan --resolution 1600x720 --script res://tests/screenshot.gd -- --out=$PWD/shots > shots.log 2>&1 || true
+          grep -E "SHOT|Vulkan|SCRIPT ERROR|at: res|ERROR" shots.log | head -60
+          ls -la shots
+          # Publish the images on a throwaway branch so they can be reviewed without artifact downloads.
+          cd shots
+          git init -q && git checkout -q -b ci-screenshots
+          git add . && git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "Screenshots for ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-screenshots

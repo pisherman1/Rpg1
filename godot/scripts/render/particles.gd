@@ -1,7 +1,8 @@
 class_name Particles
 extends RefCounted
 ## A small CPU particle system; positions in world pixels, drawn additively.
-## Each particle is [x, y, vx, vy, life, max_life, color, size, gravity, drag].
+## Each particle is [x, y, vx, vy, life, max_life, color, size, gravity, drag, spawn_y, depth_jitter].
+## In 3D, x runs east, spawn_y is the row, and (spawn_y - y) is height above the spawn point.
 
 const MAX := 800
 
@@ -24,7 +25,7 @@ func _rnd(a: float, b: float) -> float:
 func _add(x: float, y: float, vx: float, vy: float, life: float, color: Color, size: float = 1.0, gravity: float = 0.0, drag: float = 1.5) -> void:
 	if list.size() >= MAX:
 		return
-	list.append([x, y, vx, vy, life, life, color, size, gravity, drag])
+	list.append([x, y, vx, vy, life, life, color, size, gravity, drag, y, _rnd(-4.0, 4.0)])
 
 
 ## Radial spray of sparks.

@@ -7,13 +7,13 @@ enum Screen {PARTY, PLAY}
 
 const SPELLS := "Spells"
 
-const C_BG := Color("0e0b14")
-const C_PANEL := Color("1c1626")
-const C_PANEL_LIGHT := Color("2a2238")
-const C_BUTTON := Color("3a2f4e")
-const C_BUTTON_ON := Color("8a5a1e")
-const C_BUTTON_OFF := Color("231d2e")
-const C_BORDER := Color("4e4266")
+const C_BG := Color("0b0910")
+const C_PANEL := Color("17121f")
+const C_PANEL_LIGHT := Color("251d33")
+const C_BUTTON := Color("33284a")
+const C_BUTTON_ON := Color("9a6420")
+const C_BUTTON_OFF := Color("1d1727")
+const C_BORDER := Color("5a4a78")
 const C_GOLD := Color("f2c641")
 const C_TEXT := Color("ede6f5")
 const C_DIM := Color("8c82a0")
@@ -26,9 +26,18 @@ const LOG_COLORS := {
 	"BAD": Color("ff8c7a"), "LOOT": Color("f2c641"), "LEVEL": Color("e0a0ff"),
 }
 
-var world: WorldView
+var world: DungeonView
 var audio: GameAudio
+var studio: PortraitStudio
 var font: Font
+var title_font: Font
+
+var _styles := {}
+## Button presses glow briefly: [rect, time].
+var _press_rect := Rect2()
+var _press_time := -10000
+## Smoothed hit points for the party bars: hero -> [shown, trail].
+var _hp_shown := {}
 
 var screen := Screen.PARTY
 
@@ -79,13 +88,10 @@ var _name_callback: Callable
 
 
 func _ready() -> void:
-	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	var sf := SystemFont.new()
-	sf.font_names = PackedStringArray(["Droid Sans Mono", "DejaVu Sans Mono", "monospace"])
-	sf.font_weight = 700
-	sf.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-	font = sf
+	font = load("res://assets/fonts/Inter-SemiBold.otf")
+	title_font = load("res://assets/fonts/Caladea-Bold.ttf")
 	screen = Screen.PLAY if Session.game != null else Screen.PARTY
 	_name_dialog = AcceptDialog.new()
 	_name_dialog.title = "Hero name"
@@ -107,9 +113,7 @@ func _on_resized() -> void:
 	map_w = int(size.x * 0.66)
 	tile_px = 16 * maxi(2, int(size.y) / (16 * 10))
 	if world != null:
-		world.position = Vector2.ZERO
-		world.size = Vector2(map_w, size.y)
-		world.pixel_scale = tile_px / 16
+		world.map_fraction = 0.66
 
 
 func _paused() -> bool:
@@ -119,6 +123,8 @@ func _paused() -> bool:
 func _process(delta: float) -> void:
 	_now = Time.get_ticks_msec()
 	var g := Session.game
+	if studio != null:
+		studio.set_turntables_active(screen == Screen.PARTY)
 	if screen == Screen.PLAY and g != null:
 		if not _paused():
 			var interval := 105
@@ -238,6 +244,8 @@ func _handle_tap(p: Vector2) -> void:
 		if h[0].has_point(p):
 			if h[2]:
 				audio.play("CLICK")
+				_press_rect = h[0]
+				_press_time = _now
 			h[1].call()
 			return
 	var g := Session.game
@@ -264,15 +272,23 @@ func _text_width(s: String, sz: float) -> float:
 
 
 ## Draws [param s] with its baseline at y; [param align] is -1 left, 0 centre, 1 right.
-func _text(s: String, x: float, y: float, sz: float, color: Color = C_TEXT, align: int = -1) -> void:
+func _text(s: String, x: float, y: float, sz: float, color: Color = C_TEXT, align: int = -1, f: Font = null) -> void:
+	if f == null:
+		f = font
 	var fs := maxi(1, int(round(sz)))
-	var w := font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var w := f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var px := x
 	if align == 0:
 		px = x - w / 2
 	elif align == 1:
 		px = x - w
-	draw_string(font, Vector2(px, y), s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
+	draw_string(f, Vector2(px, y), s, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
+
+
+## Headings in the serif title face, with a soft drop shadow.
+func _title(s: String, x: float, y: float, sz: float, color: Color = C_GOLD, align: int = -1) -> void:
+	_text(s, x + sz * 0.05, y + sz * 0.06, sz, Color(0, 0, 0, 0.6 * color.a), align, title_font)
+	_text(s, x, y, sz, color, align, title_font)
 
 
 ## Draws [param s] shrunk to fit [param max_width].
@@ -297,34 +313,81 @@ func _wrap(s: String, sz: float, max_width: float) -> Array:
 	return out
 
 
-func _box(r: Rect2, color: Color, border = null, border_width: float = 3.0) -> void:
-	draw_rect(r, color)
+## A rounded panel style, cached by its look.
+func _style(color: Color, border, border_width: float, radius: float, shadow: float, bevel: bool = false) -> StyleBoxFlat:
+	var key := "%s|%s|%s|%s|%s|%s" % [color.to_html(), border.to_html() if border != null else "-", border_width, radius, shadow, bevel]
+	if _styles.has(key):
+		return _styles[key]
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_corner_radius_all(int(radius))
+	sb.anti_aliasing = true
 	if border != null:
-		draw_rect(r.grow(-border_width / 2), border, false, border_width)
+		sb.border_color = border
+		sb.set_border_width_all(int(border_width))
+		if bevel:
+			sb.border_width_bottom = int(border_width) + 2
+	if shadow > 0.0:
+		sb.shadow_color = Color(0, 0, 0, 0.45)
+		sb.shadow_size = int(shadow)
+		sb.shadow_offset = Vector2(0, shadow * 0.4)
+	_styles[key] = sb
+	return sb
+
+
+func _box(r: Rect2, color: Color, border = null, border_width: float = 3.0) -> void:
+	var radius := clampf(minf(r.size.x, r.size.y) * 0.12, 3.0, 12.0)
+	var big := r.size.x > size.x * 0.5 and r.size.y > size.y * 0.5
+	draw_style_box(_style(color, border, border_width, radius, 10.0 if (border != null and big) else 0.0), r)
+	# A faint sheen along the top edge gives panels some depth.
+	if r.size.y > 18 and color.a > 0.5:
+		draw_rect(Rect2(r.position.x + radius, r.position.y + border_width + 1, r.size.x - radius * 2, maxf(1.0, r.size.y * 0.04)), Color(1, 1, 1, 0.05))
 
 
 func _button(r: Rect2, label: String, action: Callable, enabled: bool = true, active: bool = false) -> void:
 	var bg := C_BUTTON_ON if active else (C_BUTTON if enabled else C_BUTTON_OFF)
-	_box(r, bg, C_GOLD if active else C_BORDER, 3.0)
-	_fit_text(label, r.get_center().x, r.get_center().y + r.size.y * 0.17, r.size.y * 0.42, r.size.x * 0.9,
+	var radius := clampf(r.size.y * 0.22, 4.0, 12.0)
+	if active:
+		# Pulsing golden glow around armed/primary buttons.
+		var glow := 0.5 + 0.5 * sin(_now / 260.0)
+		var halo := _style(Color(0, 0, 0, 0), null, 0, radius + 4, 0)
+		var g := halo.duplicate()
+		g.shadow_color = Color(1.0, 0.75, 0.25, 0.25 + 0.25 * glow)
+		g.shadow_size = 10
+		draw_style_box(g, r)
+	var border: Color = C_GOLD if active else (C_BORDER if enabled else Color("2c2438"))
+	draw_style_box(_style(bg, border, 2.0, radius, 3.0 if enabled else 0.0, true), r)
+	# Top highlight and a lower shade make the button read as raised.
+	draw_rect(Rect2(r.position.x + radius, r.position.y + 3, r.size.x - radius * 2, r.size.y * 0.32), Color(1, 1, 1, 0.07 if enabled else 0.02))
+	var pressed := r == _press_rect and _now - _press_time < 220
+	if pressed:
+		var k := 1.0 - (_now - _press_time) / 220.0
+		draw_style_box(_style(Color(1, 0.9, 0.6, 0.35 * k), null, 0, radius, 0), r)
+	_fit_text(label, r.get_center().x, r.get_center().y + r.size.y * 0.15, r.size.y * 0.38, r.size.x * 0.88,
 		C_TEXT if enabled else C_DIM, 0)
 	if enabled:
 		_hit(r, action, true)
 
 
-func _sprite(tex: Texture2D, left: float, top: float, sz: float, scale: float = 1.0, color: Color = Color.WHITE) -> void:
-	var s := sz * scale
-	draw_texture_rect(tex, Rect2(left + (sz - s) / 2, top + sz - s, s, s), false, color)
+## Draws a portrait texture fitted (keeping its aspect) into the square at left/top of side sz.
+func _portrait(tex: Texture2D, left: float, top: float, sz: float, color: Color = Color.WHITE, framed: bool = true) -> void:
+	if framed:
+		draw_style_box(_style(Color("0d0a14"), Color(C_BORDER, 0.8), 1.0, sz * 0.12, 0), Rect2(left, top, sz, sz))
+	if tex == null:
+		return
+	var ts := tex.get_size()
+	var scale := sz / maxf(ts.x, ts.y) * 1.08
+	var w := ts.x * scale
+	var h := ts.y * scale
+	draw_texture_rect(tex, Rect2(left + (sz - w) / 2, top + sz - h, w, h), false, color)
 
 
-func _hero_sprite(h: Hero, left: float, top: float, sz: float) -> void:
-	_sprite(Atlas.hero_texture(h), left, top, sz, Atlas.hero_scale(h.race))
+func _hero_sprite(h: Hero, left: float, top: float, sz: float, color: Color = Color.WHITE) -> void:
+	_portrait(studio.hero_texture(h.race, h.char_class, h.gender) if studio != null else null, left, top, sz, color)
 
 
 func _creature_texture(c: Creature) -> Texture2D:
-	if c is Hero:
-		return Atlas.hero_texture(c)
-	return Atlas.texture(Atlas.monster_key(c.type))
+	return studio.creature_texture(c) if studio != null else null
 
 
 func _draw() -> void:
@@ -333,7 +396,8 @@ func _draw() -> void:
 	if screen == Screen.PLAY and Session.game != null:
 		draw_rect(_r(map_w, 0, size.x, size.y), C_BG)
 	else:
-		draw_rect(Rect2(Vector2.ZERO, size), C_BG)
+		draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(size.x, 0), size, Vector2(0, size.y)]),
+			PackedColorArray([Color("1d1530"), Color("1d1530"), Color("07060b"), Color("07060b")]))
 	match screen:
 		Screen.PARTY:
 			_draw_party_screen()
@@ -359,8 +423,8 @@ func _draw_party_screen() -> void:
 	var h := size.y
 	var builder := Session.builder
 	var pad := h * 0.025
-	_text("DUNGEON DELVER", w / 2, h * 0.09, h * 0.07, C_GOLD, 0)
-	_text("Assemble your party of four", w / 2, h * 0.14, h * 0.035, C_DIM, 0)
+	_title("DUNGEON DELVER", w / 2, h * 0.095, h * 0.08, C_GOLD, 0)
+	_text("Assemble your party of four", w / 2, h * 0.145, h * 0.03, C_DIM, 0)
 
 	var card_top := h * 0.17
 	var card_bottom := h * 0.85
@@ -375,8 +439,11 @@ func _draw_party_screen() -> void:
 		var line := (card_bottom - card_top) / 15.0
 		var y := card_top + line * 0.3
 
-		var sprite_size := minf(card_w * 0.42, line * 3.4)
-		_hero_sprite(hero, cx - sprite_size / 2, y, sprite_size)
+		var sprite_size := minf(card_w * 0.62, line * 3.4)
+		# A pedestal glow under a slowly turning 3D model of the hero.
+		draw_circle(Vector2(cx, y + sprite_size * 0.95), sprite_size * 0.32, Color(1.0, 0.75, 0.35, 0.08))
+		var tt := studio.turntable(i, draft.race, draft.char_class, draft.gender) if studio != null else null
+		_portrait(tt, cx - sprite_size / 2, y - line * 0.2, sprite_size, Color.WHITE, false)
 		y += sprite_size + line * 0.9
 
 		# Name (tap to edit)
@@ -473,124 +540,54 @@ func _draw_play(g: Game) -> void:
 		_draw_game_over(g)
 
 
-func _tile_rect(x: int, y: int) -> Rect2:
-	return Rect2(world.animator.to_screen(x * 16.0, y * 16.0), Vector2(tile_px, tile_px))
+func _clip_x(x: float) -> bool:
+	return x > -40 and x < map_w + 40
 
 
-## Where a creature is drawn right now (it glides between squares).
-func _creature_rect(c: Creature) -> Rect2:
-	var p := world.animator.display_pos(c)
-	return Rect2(world.animator.to_screen(p.x, p.y), Vector2(tile_px, tile_px))
-
-
-func _clip(r: Rect2) -> bool:
-	return r.position.x < map_w and r.end.x > 0
-
-
-## UI markers over the world: movement range, selection outlines, health bars.
+## Health bars, leader star and status icons over the 3D world (rings and move squares are drawn in 3D).
 func _draw_map_markers(g: Game) -> void:
 	var d := g.dungeon
-	var active := g.active_hero()
-	if g.phase == Game.Phase.PLAYER_TURN and g.movement_left > 0 and g.armed_spell == "" and not g.armed_ranged and not g.armed_potion:
-		if active != null and not active.is_unconscious():
-			for p in _reachable(g, active):
-				var r := _tile_rect(p.x, p.y)
-				if not _clip(r):
-					continue
-				draw_rect(r, Color(0.18, 0.49, 0.94, 0.19))
-				draw_rect(r.grow(-2), Color(0.29, 0.56, 1.0, 0.38), false, 2.0)
-	var pulse := 0.5 + 0.5 * sin(_now / 180.0)
-	var feature := g.armed_feature
-	var targeting := g.armed_spell != "" or g.armed_ranged or feature in ["CHALLENGE", "HUNTERS_MARK", "VOLLEY"]
-	if feature == "RAISE_DEAD" and active != null:
-		for p in g.corpses:
-			if d.is_visible(p.x, p.y) and maxi(absi(p.x - active.x), absi(p.y - active.y)) <= 6:
-				_outline(_tile_rect(p.x, p.y), Color("7cff9a"), pulse)
+	var creatures: Array = []
 	for m in g.monsters:
-		if not d.is_visible(m.x, m.y):
+		if d.is_visible(m.x, m.y):
+			creatures.append(m)
+	creatures.append_array(g.living_heroes())
+	for c in creatures:
+		var pos := world.animator.display_pos(c)
+		if world.is_behind(pos):
 			continue
-		var r := _creature_rect(m)
-		if not _clip(r):
+		var tall := 1.25
+		if c is Monster:
+			tall = 1.15 * _monster_height(c.type)
+		var top := world.to_screen(pos, tall)
+		if not _clip_x(top.x):
 			continue
-		_draw_hp_bar(r, m.hp, m.get_max_hp())
-		if m == g.current():
-			_outline(r, Color("7cff9a") if m.ally else Color("e04040"), pulse)
-		elif m.ally:
-			continue
-		elif targeting and active != null and _in_range_of(g, active, m):
-			_outline(r, Color("ff7040"), pulse)
-		if m.challenger != null:
-			_text("⚔", r.position.x + tile_px * 0.15, r.position.y + tile_px * 0.3, tile_px * 0.28, C_GOLD, 0)
-		if m.hunted_by != null:
-			_text("◎", r.end.x - tile_px * 0.15, r.end.y - tile_px * 0.08, tile_px * 0.28, Color("8ae0ff"), 0)
-	var ally_targeting: bool = g.armed_potion or g.armed_feature == "LAY_ON_HANDS" or \
-		(g.armed_spell != "" and Rules.SPELLS[g.armed_spell]["target"] == "ALLY")
-	for h in g.living_heroes():
-		var r := _creature_rect(h)
-		if not _clip(r):
-			continue
-		_draw_hp_bar(r, h.hp, h.get_max_hp())
-		if h == active:
-			_outline(r, C_GOLD, pulse)
-		elif ally_targeting:
-			_outline(r, Color("50e070"), pulse)
-		if g.phase == Game.Phase.EXPLORING and h == g.leader():
-			_text("★", r.get_center().x, r.position.y - tile_px * 0.02, tile_px * 0.3, C_GOLD, 0)
+		var ppm := world.px_per_metre(pos)
+		var bar_w := ppm * 0.7
+		if c.hp < c.get_max_hp():
+			var frac := clampf(float(c.hp) / c.get_max_hp(), 0.0, 1.0)
+			var r := Rect2(top.x - bar_w / 2, top.y - 10, bar_w, maxf(5.0, ppm * 0.07))
+			draw_style_box(_style(Color(0, 0, 0, 0.7), null, 0, 3, 0), r.grow(1.5))
+			draw_style_box(_style(C_HP_LOW if frac < 0.35 else C_HP, null, 0, 3, 0), Rect2(r.position, Vector2(r.size.x * frac, r.size.y)))
+		if c is Monster:
+			if c.challenger != null:
+				_text("⚔", top.x - bar_w / 2 - 6, top.y - 14, ppm * 0.22, C_GOLD, 0)
+			if c.hunted_by != null:
+				_text("◎", top.x + bar_w / 2 + 6, top.y - 14, ppm * 0.22, Color("8ae0ff"), 0)
+		elif g.phase == Game.Phase.EXPLORING and c == g.leader():
+			_text("★", top.x, top.y - 16, ppm * 0.3, C_GOLD, 0)
 
 
-func _in_range_of(g: Game, h: Hero, m: Monster) -> bool:
-	var range := 1
-	if g.armed_spell != "":
-		range = Rules.SPELLS[g.armed_spell]["range"]
-	elif g.armed_feature == "CHALLENGE":
-		range = 6
-	elif g.armed_feature == "HUNTERS_MARK":
-		range = 99
-	else:
-		range = h.ranged_weapon().get("range", 1)
-	return h.distance_to(m) <= range and g.dungeon.has_line_of_sight(h.x, h.y, m.x, m.y)
-
-
-## Squares the hero can reach with their remaining movement (allies can be passed, not stopped on).
-func _reachable(g: Game, h: Hero) -> Array:
-	var d := g.dungeon
-	var start := Vector2i(h.x, h.y)
-	var dist := {start: 0}
-	var queue: Array[Vector2i] = [start]
-	var head := 0
-	while head < queue.size():
-		var p := queue[head]
-		head += 1
-		var dp: int = dist[p]
-		if dp >= g.movement_left:
-			continue
-		for dir in Dungeon.DIRS:
-			var n := p + dir
-			if dist.has(n) or not d.is_explored(n.x, n.y):
-				continue
-			if not d.can_step(p.x, p.y, n.x, n.y) or g.monster_at(n.x, n.y) != null:
-				continue
-			dist[n] = dp + 1
-			queue.append(n)
-	dist.erase(start)
-	return dist.keys().filter(func(p): return g.hero_at(p.x, p.y) == null)
-
-
-func _outline(r: Rect2, color: Color, pulse: float) -> void:
-	var w := maxf(3.0, tile_px / 16.0)
-	draw_rect(r.grow(-w / 2), Color(color, (140 + 115 * pulse) / 255.0), false, w)
-
-
-func _draw_hp_bar(r: Rect2, hp: int, max_hp: int) -> void:
-	if hp >= max_hp:
-		return
-	var h := maxf(4.0, tile_px / 14.0)
-	var top := r.position.y + 1
-	var left := r.position.x + tile_px * 0.1
-	var width := r.size.x - tile_px * 0.2
-	draw_rect(Rect2(left, top, width, h), Color(0, 0, 0, 0.75))
-	var frac := maxf(0.0, float(hp)) / max_hp
-	draw_rect(Rect2(left, top, width * frac, h), C_HP_LOW if frac < 0.35 else C_HP)
+static func _monster_height(type: String) -> float:
+	match type:
+		"GIANT_RAT": return 0.45
+		"KOBOLD": return 0.7
+		"GOBLIN": return 0.78
+		"ORC": return 1.2
+		"GNOLL": return 1.25
+		"BUGBEAR": return 1.4
+		"OGRE": return 1.85
+	return 1.08
 
 
 ## Damage numbers and other combat text, rising and fading above the world.
@@ -600,10 +597,10 @@ func _draw_float_texts() -> void:
 			continue
 		var t := clampf(ft["age"] / 0.9, 0.0, 1.0)
 		var alpha := clampf(1.0 - t * t, 0.0, 1.0)
-		var p := world.animator.to_screen(ft["x"], ft["y"])
+		var p := world.camera.unproject_position(Vector3(ft["x"] / 16.0, 1.3 + t * 0.6, ft["y"] / 16.0 + 0.25))
 		if p.x > map_w:
 			continue
-		var y := p.y - t * tile_px * 0.8
+		var y := p.y
 		# Crits pop in larger.
 		var pop := 0.5 + 0.25 * (1.0 - minf(1.0, t * 4.0)) if ft["kind"] == "CRIT" else 0.38
 		_text(ft["text"], p.x + 3, y + 3, tile_px * pop, Color(0, 0, 0, alpha), 0)
@@ -666,7 +663,8 @@ func _draw_panel(g: Game) -> void:
 		_box(r, C_DARK if hero.dead else C_PANEL_LIGHT, C_GOLD if is_active else null, 4.0)
 		var s := row_h - pad * 3
 		if hero.dead:
-			draw_texture_rect(Atlas.texture("grave"), Rect2(r.position.x + pad, r.position.y + pad, s, s), false)
+			_hero_sprite(hero, r.position.x + pad, r.position.y + pad, s, Color(0.3, 0.3, 0.36))
+			_text("✝", r.position.x + pad + s / 2, r.position.y + pad + s * 0.7, s * 0.5, Color(0.8, 0.8, 0.9, 0.8), 0)
 		else:
 			_hero_sprite(hero, r.position.x + pad, r.position.y + pad, s)
 		var tx := r.position.x + pad * 2 + s
@@ -680,9 +678,21 @@ func _draw_panel(g: Game) -> void:
 		var bar_top := r.position.y + row_h * 0.56
 		var bar_right := r.end.x - pad
 		var bar_h := row_h * 0.14
-		draw_rect(_r(tx, bar_top, bar_right, bar_top + bar_h), Color.BLACK)
 		var frac := maxf(0.0, float(hero.hp)) / hero.get_max_hp()
-		draw_rect(_r(tx, bar_top, tx + (bar_right - tx) * frac, bar_top + bar_h), C_HP_LOW if frac < 0.35 else C_HP)
+		# The bar eases toward the new value; a pale trail shows recent damage draining away.
+		var st: Array = _hp_shown.get(hero, [frac, frac])
+		st[0] = lerpf(st[0], frac, 0.25)
+		st[1] = maxf(st[0], lerpf(st[1], st[0], 0.04)) if st[1] > st[0] else st[0]
+		_hp_shown[hero] = st
+		var bar := _r(tx, bar_top, bar_right, bar_top + bar_h)
+		var rad := bar_h * 0.45
+		draw_style_box(_style(Color(0, 0, 0, 0.8), null, 0, rad, 0), bar)
+		if st[1] > st[0] + 0.002:
+			draw_style_box(_style(Color(1.0, 0.85, 0.6, 0.75), null, 0, rad, 0), Rect2(bar.position, Vector2(bar.size.x * st[1], bar_h)))
+		if st[0] > 0.005:
+			var hp_col := C_HP_LOW if st[0] < 0.35 else C_HP
+			draw_style_box(_style(hp_col, null, 0, rad, 0), Rect2(bar.position, Vector2(maxf(bar_h, bar.size.x * st[0]), bar_h)))
+			draw_rect(Rect2(bar.position.x + rad, bar.position.y + 1, maxf(0.0, bar.size.x * st[0] - rad * 2), bar_h * 0.3), Color(1, 1, 1, 0.18))
 		var status := "%d/%d" % [hero.hp, hero.get_max_hp()]
 		if hero.dead:
 			status = "DEAD"
@@ -725,7 +735,7 @@ func _draw_panel(g: Game) -> void:
 			var r := Rect2(left + pad + i * icon, y, icon, icon)
 			if i == g.turn_index:
 				_box(r, Color("5a4520"))
-			draw_texture_rect(_creature_texture(g.turn_order[i]), r, false)
+			_portrait(_creature_texture(g.turn_order[i]), r.position.x, r.position.y, r.size.x)
 		y += icon + pad
 	else:
 		_fit_text("Gold %d   Foes slain %d" % [g.party_gold(), g.kills], left + pad, y + ts, ts, w - pad * 2, C_DIM)
@@ -1281,7 +1291,7 @@ func _draw_level_banner(g: Game) -> void:
 	var s := h * 0.17
 	var bob := sin(age / 160.0) * h * 0.006
 	if alpha > 0.05:
-		_sprite(Atlas.hero_texture(hero), r.position.x + pad, r.position.y + pad + bob, s, Atlas.hero_scale(hero.race), Color(1, 1, 1, alpha))
+		_hero_sprite(hero, r.position.x + pad, r.position.y + pad + bob, s, Color(1, 1, 1, alpha))
 	var tx := r.position.x + pad * 2 + s
 	var pop := 1.0 + 0.25 * (1.0 - minf(1.0, age / 300.0))
 	var cls_name: String = Rules.SUBCLASSES[hero.subclass]["display_name"] if hero.subclass != "" else hero.cls()["display_name"]

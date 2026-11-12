@@ -11,10 +11,10 @@ config_version=5
 [application]
 
 config/name="Dungeon Delver 2"
-config/description="A pixel-art party dungeon crawler with D&D 5e-style rules."
+config/description="A 3D party dungeon crawler with D&D 5e-style rules."
 config/version="2.0.0"
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.5", "GL Compatibility")
+config/features=PackedStringArray("4.5", "Mobile")
 config/icon="res://icon.png"
 config/quit_on_go_back=false
 
@@ -31,10 +31,10 @@ pointing/emulate_touch_from_mouse=true
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
-textures/canvas_textures/default_texture_filter=0
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+anti_aliasing/quality/msaa_3d=2
 textures/vram_compression/import_etc2_astc=true
-2d/snap/snap_2d_transforms_to_pixel=true
-2d/snap/snap_2d_vertices_to_pixel=true
-environment/defaults/default_clear_color=Color(0.055, 0.043, 0.078, 1)
+environment/defaults/default_clear_color=Color(0.02, 0.016, 0.03, 1)
+lights_and_shadows/positional_shadow/atlas_size=2048
+lights_and_shadows/positional_shadow/atlas_size.mobile=2048

@@ -1,5 +1,5 @@
 extends Node
-## Entry point: the world view under the game UI, plus audio.
+## Entry point: the 3D dungeon under the game UI, plus audio and the portrait studio.
 
 var ui: GameUI
 
@@ -7,14 +7,17 @@ var ui: GameUI
 func _ready() -> void:
 	var audio := GameAudio.new()
 	add_child(audio)
+	var studio := PortraitStudio.new()
+	add_child(studio)
+	var world := DungeonView.new()
+	add_child(world)
 	var root := Control.new()
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
-	var world := WorldView.new()
-	root.add_child(world)
 	ui = GameUI.new()
 	ui.world = world
 	ui.audio = audio
+	ui.studio = studio
 	root.add_child(ui)
 	# The root Control's parent is a plain Node, so size it to the window ourselves.
 	get_viewport().size_changed.connect(_fit_to_window)

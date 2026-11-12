@@ -1,14 +1,21 @@
 extends SceneTree
-## Renders the party screen and a few seconds of play, then prints small JPEG screenshots as base64
-## between markers so CI logs can be checked visually. Needs a real renderer (e.g. under xvfb).
+## Renders the real game with a real GPU (or lavapipe) and saves screenshots for visual review:
+##   godot --path godot --script res://tests/screenshot.gd -- --out=/some/dir
+## Shots: party screen, exploring, combat, character sheet, level-up panel.
 
 var _main: Node
 var _frame := 0
 var _bot
-var _done := false
+var _out := "user://shots"
+var _taken := {}
+var _busy := false
 
 
 func _initialize() -> void:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--out="):
+			_out = a.substr(6)
+	DirAccess.make_dir_recursive_absolute(_out)
 	Session.dice = Dice.new(5)
 	Session.new_party()
 	_main = load("res://scenes/main.tscn").instantiate()
@@ -16,57 +23,65 @@ func _initialize() -> void:
 	_bot = load("res://tests/bot.gd").new()
 
 
-func _shot(label: String, then_quit: bool = false) -> void:
+func _shot(label: String) -> void:
+	_busy = true
+	_taken[label] = true
 	await RenderingServer.frame_post_draw
-	var ui: GameUI = _main.ui
-	print("ui size=%s pos=%s hits=%d visible=%s world=%s" % [ui.size, ui.global_position, ui._hits.size(), ui.is_visible_in_tree(), ui.world.size])
-	print("renderer=%s size=%s game=%s" % [RenderingServer.get_video_adapter_name(), root.size, Session.game != null])
 	var img := root.get_texture().get_image()
-	print("SHOT %s: %s" % [label, _stats(img)])
-	if then_quit:
-		quit(0)
+	var path := "%s/%s.jpg" % [_out, label]
+	img.save_jpg(path, 0.88)
+	var g: Game = Session.game
+	print("SHOT %s -> %s (game=%s, phase=%s)" % [label, path, g != null, Game.Phase.keys()[g.phase] if g != null else "-"])
+	_busy = false
 
 
 func _process(_delta: float) -> bool:
-	if _done:
+	if _busy:
 		return false
 	_frame += 1
 	var ui: GameUI = _main.ui
-	if _frame == 20:
-		_shot("party")
-	elif _frame == 26:
-		print("tap: ui size=%s hits=%d" % [ui.size, ui._hits.size()])
+	if _frame == 40:
+		_shot("1_party")
+		return false
+	if _frame == 45:
 		ui._handle_tap(Vector2(ui.size.x * 0.85, ui.size.y * 0.92))
-	elif _frame > 26 and Session.game != null:
-		var g: Game = Session.game
-		# Explore until the first fight, then let it play out a little.
-		if not g.is_busy() and g.phase != Game.Phase.GAME_OVER and _frame % 3 == 0 and (g.phase == Game.Phase.EXPLORING or _frame % 9 == 0):
+		if Session.game == null:
+			ui._begin_adventure()
+	var g: Game = Session.game
+	if g == null:
+		return false
+	if _frame == 90 and not _taken.has("2_explore"):
+		_shot("2_explore")
+		return false
+	if _frame > 90:
+		# Let the bot play; the game is ticked by the UI's own timer as well.
+		if not g.is_busy() and g.phase != Game.Phase.GAME_OVER and _frame % 4 == 0:
 			_bot.decide(g)
-		g.tick()
-		if _frame == 400 or (g.in_combat() and _frame % 40 == 0 and _frame > 120):
-			_done = _frame > 120
-			_shot("play-%d" % _frame, _done)
-	if _frame > 2000:
-		_done = true
-		_shot("final", true)
+		if _frame % 2 == 0:
+			g.tick()
+	if g.in_combat() and not _taken.has("3_combat") and _frame > 120:
+		if _taken.has("_combat_seen") and _frame - int(_taken["_combat_seen"]) > 25:
+			_shot("3_combat")
+			return false
+		if not _taken.has("_combat_seen"):
+			_taken["_combat_seen"] = _frame
+	if _taken.has("3_combat") and not _taken.has("4_sheet"):
+		ui._sheet_hero = g.party[0]
+		if _frame - int(_taken.get("_sheet_open", _frame)) > 3:
+			_shot("4_sheet")
+			ui._sheet_hero = null
+			return false
+		_taken["_sheet_open"] = _taken.get("_sheet_open", _frame)
+	if _taken.has("4_sheet") and not _taken.has("5_levelup"):
+		ui._open_level_up(g.party[2])
+		if _frame - int(_taken.get("_lu_open", _frame)) > 3:
+			_shot("5_levelup")
+			ui._level_up_hero = null
+			return false
+		_taken["_lu_open"] = _taken.get("_lu_open", _frame)
+	if _taken.has("5_levelup") or _frame > 3000:
+		if not _taken.has("6_final"):
+			_shot("6_final")
+			return false
+		quit(0)
 	return false
-
-
-## Mean brightness and number of distinct colours for the map area and the side panel.
-func _stats(img: Image) -> String:
-	var out := []
-	var w := img.get_width()
-	var h := img.get_height()
-	for region in [["map", Rect2i(0, 0, int(w * 0.66), h)], ["panel", Rect2i(int(w * 0.66), 0, w - int(w * 0.66), h)]]:
-		var r: Rect2i = region[1]
-		var total := 0.0
-		var colors := {}
-		var n := 0
-		for y in range(r.position.y, r.end.y, 6):
-			for x in range(r.position.x, r.end.x, 6):
-				var c := img.get_pixel(x, y)
-				total += c.get_luminance()
-				colors[c.to_rgba32() >> 12] = true
-				n += 1
-		out.append("%s lum=%.3f colors=%d" % [region[0], total / maxi(1, n), colors.size()])
-	return ", ".join(out)
