@@ -13,9 +13,8 @@ const FOG_MEMORY := Color(0.24, 0.27, 0.4)
 const MAX_SHADOW_TORCHES := 4
 const ZOOM_MIN := 0.5
 const ZOOM_MAX := 1.9
-## false: squeezing fingers together zooms in and spreading zooms out (as requested);
-## true: the usual phone-map behaviour (spreading zooms in).
-const PINCH_SPREAD_ZOOMS_IN := false
+## true: standard phone behaviour (spread fingers to zoom in, pinch together to zoom out).
+const PINCH_SPREAD_ZOOMS_IN := true
 
 var animator := WorldAnimator.new()
 var game: Game = null

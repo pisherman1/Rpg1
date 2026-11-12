@@ -82,7 +82,7 @@ func _process(_delta: float) -> bool:
 	return false
 
 
-## Feeds touch events through the UI: a drag pans, a squeeze zooms in, a spread zooms out,
+## Feeds touch events through the UI: a drag pans, a pinch zooms out, a spread zooms in,
 ## and a short tap is still a tap (not a pan).
 func _check_gestures(ui: GameUI) -> void:
 	var world: DungeonView = ui.world
@@ -103,16 +103,16 @@ func _check_gestures(ui: GameUI) -> void:
 	ui._input(_drag(1, p + Vector2(40, 0), Vector2(-60, 0)))
 	ui._input(_touch(1, p + Vector2(40, 0), false))
 	ui._input(_touch(0, p - Vector2(100, 0), false))
-	if not world.zoom < before:
-		fail("squeezing did not zoom in (%s -> %s)" % [before, world.zoom])
+	if not world.zoom > before:
+		fail("pinching did not zoom out (%s -> %s)" % [before, world.zoom])
 	before = world.zoom
 	ui._input(_touch(0, p - Vector2(40, 0), true))
 	ui._input(_touch(1, p + Vector2(40, 0), true))
 	ui._input(_drag(1, p + Vector2(140, 0), Vector2(100, 0)))
 	ui._input(_touch(1, p + Vector2(140, 0), false))
 	ui._input(_touch(0, p - Vector2(40, 0), false))
-	if not world.zoom > before:
-		fail("spreading did not zoom out (%s -> %s)" % [before, world.zoom])
+	if not world.zoom < before:
+		fail("spreading did not zoom in (%s -> %s)" % [before, world.zoom])
 	var pan := world.pan_offset
 	ui._input(_touch(0, p, true))
 	ui._input(_touch(0, p + Vector2(2, 1), false))

@@ -262,7 +262,7 @@ func _input(event: InputEvent) -> void:
 		if _touches.size() >= 2:
 			var d := _two_finger_distance()
 			if _pinch_dist > 1.0 and d > 1.0 and _can_move_camera(_touch_start.values()[0]):
-				# Squeeze (fingers together) zooms in, spreading them zooms out.
+				# Spreading the fingers zooms in, pinching them together zooms out.
 				var ratio := d / _pinch_dist
 				world.zoom_by(ratio if not DungeonView.PINCH_SPREAD_ZOOMS_IN else 1.0 / ratio)
 			_pinch_dist = d
