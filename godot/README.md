@@ -1,7 +1,8 @@
 # Dungeon Delver 2 (Godot)
 
-A Godot 4.5 port of Dungeon Delver: the same D&D 5e-style rules, party of four, subclasses,
-loot, saves, pixel art, lighting and chiptune audio as the Android/Kotlin version in the parent folder.
+A Godot 4.5 version of Dungeon Delver in 3D: the same D&D 5e-style rules, party of four, subclasses,
+loot, saves and chiptune audio as the Android/Kotlin version in the parent folder, rebuilt as a lit 3D
+dungeon with animated low-poly heroes and monsters. Uses the Mobile (Vulkan) renderer.
 
 ## Opening it
 
@@ -24,13 +25,15 @@ alongside the original game.
 | Path | What |
 | --- | --- |
 | `scripts/core/` | Rules engine: `rules.gd` (data tables), `dice.gd`, `hero.gd`, `monster.gd`, `items.gd`, `dungeon.gd`, `party.gd`, `game.gd` |
-| `scripts/art/` | `sprites.gd` (16x16 pixel art as text) and `atlas.gd` (builds textures, composes heroes by race/class/gender) |
-| `scripts/render/` | `world_animator.gd` (motion, effects, camera), `particles.gd`, `world_view.gd` (render passes) |
-| `shaders/` | `lit.gdshader` (light map + fog of war), `final.gdshader` (bloom, grading, vignette) |
+| `scripts/world3d/` | `dungeon_view.gd` (3D level, fog of war, lights, actors, effects, markers, camera), `models.gd` (procedural heroes, monsters, props), `figure.gd` (rig + animation), `mats.gd` (materials), `portrait_studio.gd` (3D portraits for the UI) |
+| `scripts/render/` | `world_animator.gd` (motion timing, effects, camera focus) and `particles.gd`, shared by the 3D view |
+| `assets/textures/` | Tileable stone, brick, wood and rock (albedo + normal), made by `tools/make_textures.py` |
+| `assets/fonts/` | Caladea and Inter (SIL Open Font License) |
+| `scripts/art/` | The original 16x16 sprites (kept for reference) |
 | `scripts/ui/game_ui.gd` | Party builder, side panel, sheets, level-up, inventory, menus |
 | `scripts/audio/game_audio.gd` | Sound effects and music; files in `assets/audio/` |
 | `scripts/session.gd` | Current game and save slots (`user://saves`) |
-| `tests/` | Headless tests: `godot --headless --path godot --script res://tests/run_tests.gd` |
+| `tests/` | Headless tests: `godot --headless --path godot --script res://tests/run_tests.gd`; `screenshot.gd` renders review screenshots (CI pushes them to the `ci-screenshots` branch) |
 
 Saves use the same JSON format as the Android version. Premade heroes and parties live in
 `scripts/core/party.gd` (`HEROES` and `PARTIES`); add entries there and they appear in the game.

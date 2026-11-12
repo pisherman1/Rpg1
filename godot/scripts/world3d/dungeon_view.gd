@@ -100,7 +100,7 @@ func _ready() -> void:
 	reach_mm.mesh = plane
 	_reach = MultiMeshInstance3D.new()
 	_reach.multimesh = reach_mm
-	var reach_mat: StandardMaterial3D = Mats.marker(Color(0.55, 0.8, 1.0, 0.55)).duplicate()
+	var reach_mat: StandardMaterial3D = Mats.marker(Color(0.55, 0.8, 1.0, 0.32)).duplicate()
 	reach_mat.albedo_texture = _outline_texture()
 	_reach.material_override = reach_mat
 	_reach.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -710,7 +710,7 @@ static func _outline_texture() -> Texture2D:
 			var a := 0.0
 			if d < 4.0:
 				a = 1.0 - absf(d - 2.0) / 2.5
-			a = maxf(a, 0.18)
+			a = maxf(a, 0.1)
 			img.set_pixel(x, y, Color(1, 1, 1, clampf(a, 0.0, 1.0)))
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)

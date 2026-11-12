@@ -242,8 +242,8 @@ static func _shield(arm: Node3D, f: Figure, face: Color, rim: Color, round_shiel
 static func monster(type: String) -> Figure:
 	match type:
 		"GIANT_RAT": return _rat()
-		"KOBOLD": return _humanoid(0.62, 1.0, Color(0.78, 0.42, 0.2), Color(0.45, 0.25, 0.15), "spear", "kobold")
-		"GOBLIN": return _humanoid(0.7, 1.0, Color(0.38, 0.6, 0.26), Color(0.38, 0.28, 0.18), "scimitar", "goblin")
+		"KOBOLD": return _humanoid(0.62, 0.72, Color(0.78, 0.42, 0.2), Color(0.45, 0.25, 0.15), "spear", "kobold")
+		"GOBLIN": return _humanoid(0.7, 0.8, Color(0.38, 0.6, 0.26), Color(0.38, 0.28, 0.18), "scimitar", "goblin")
 		"SKELETON": return _humanoid(0.98, 0.7, BONE, BONE, "sword", "skeleton")
 		"ZOMBIE": return _humanoid(1.0, 1.05, Color(0.45, 0.56, 0.4), Color(0.3, 0.25, 0.22), "", "zombie")
 		"ORC": return _humanoid(1.12, 1.3, Color(0.36, 0.46, 0.3), Color(0.22, 0.2, 0.2), "axe", "orc")
@@ -307,7 +307,8 @@ static func _humanoid(hgt: float, bulk: float, skin: Color, cloth: Color, weapon
 		"orc":
 			for side in [-1, 1]:
 				f.part(f.head, Figure.cone(0.016, 0.06, 6), s(Color(0.95, 0.92, 0.8), 0.5), Vector3(side * 0.04, 0.08, 0.1), Vector3(0, 0, 0))
-			f.part(f.torso, Figure.box(Vector3(0.34, 0.12, 0.26)), metal(IRON), Vector3(0, 0.32, 0))  # pauldrons
+			for side in [-1, 1]:
+				f.part(f.torso, Figure.sphere(0.075, 8), metal(IRON), Vector3(side * 0.16, 0.31, 0), Vector3.ZERO, Vector3(1.2, 0.8, 1))  # pauldrons
 		"gnoll", "bugbear":
 			var snout := 0.16 if kind == "gnoll" else 0.08
 			f.part(f.head, Figure.box(Vector3(0.09, 0.08, snout)), head_mat, Vector3(0, 0.09, 0.08 + snout / 2))
