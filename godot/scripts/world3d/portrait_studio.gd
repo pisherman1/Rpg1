@@ -107,7 +107,7 @@ func _make_viewport(size: Vector2i, height: float) -> SubViewport:
 	var cam := Camera3D.new()
 	cam.fov = 30.0
 	var aspect := float(size.x) / size.y
-	var dist := 1.15 * height / tan(deg_to_rad(15.0)) * (0.55 if aspect < 1.0 else 0.6)
+	var dist := 1.15 * height / tan(deg_to_rad(15.0)) * (0.4 if aspect < 1.0 else 0.45)
 	vp.add_child(cam)
-	cam.look_at_from_position(Vector3(0, 0.62 * height, dist), Vector3(0, 0.5 * height, 0), Vector3.UP)
+	cam.look_at_from_position(Vector3(0, 0.66 * height, dist), Vector3(0, 0.52 * height, 0), Vector3.UP)
 	return vp

@@ -7,8 +7,8 @@ extends Node3D
 const WALL_H := 1.25
 const LOW_WALL_H := 0.32
 const PX := 16.0
-const CAM_DIST := 8.6
-const CAM_PITCH := 56.0
+const CAM_DIST := 7.0
+const CAM_PITCH := 58.0
 const FOG_MEMORY := Color(0.24, 0.27, 0.4)
 const MAX_SHADOW_TORCHES := 4
 
@@ -23,6 +23,7 @@ var _level: Node3D
 var _floors: MultiMeshInstance3D
 var _walls: MultiMeshInstance3D
 var _low_walls: MultiMeshInstance3D
+var _caps: MultiMeshInstance3D
 var _floor_tiles: Array[Vector2i] = []
 var _wall_tiles: Array[Vector2i] = []
 var _low_wall_tiles: Array[Vector2i] = []
@@ -51,7 +52,7 @@ func _ready() -> void:
 	e.background_color = Color(0.01, 0.008, 0.015)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.42, 0.44, 0.62)
-	e.ambient_light_energy = 0.32
+	e.ambient_light_energy = 0.48
 	e.tonemap_mode = Environment.TONE_MAPPER_ACES
 	e.tonemap_exposure = 1.1
 	e.glow_enabled = true
@@ -97,7 +98,9 @@ func _ready() -> void:
 	reach_mm.mesh = plane
 	_reach = MultiMeshInstance3D.new()
 	_reach.multimesh = reach_mm
-	_reach.material_override = Mats.marker(Color(0.25, 0.55, 1.0, 0.22))
+	var reach_mat: StandardMaterial3D = Mats.marker(Color(0.55, 0.8, 1.0, 0.55)).duplicate()
+	reach_mat.albedo_texture = _outline_texture()
+	_reach.material_override = reach_mat
 	_reach.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_reach)
 
@@ -223,6 +226,8 @@ func _build_level(d: Dungeon) -> void:
 	_floors = _tile_multimesh(_floor_tiles, Figure.box(Vector3(1, 0.2, 1)), Mats.textured("floor", 0.5, 0.85, true), -0.1)
 	_walls = _tile_multimesh(_wall_tiles, Figure.box(Vector3(1, WALL_H, 1)), Mats.textured("wall", 0.5, 0.9, true), WALL_H / 2)
 	_low_walls = _tile_multimesh(_low_wall_tiles, Figure.box(Vector3(1, LOW_WALL_H, 1)), Mats.textured("wall", 0.5, 0.9, true), LOW_WALL_H / 2)
+	# Dark stone caps so the tops of walls read as solid rock, not floor.
+	_caps = _tile_multimesh(_wall_tiles, Figure.box(Vector3(1.02, 0.08, 1.02)), Mats.textured("rock", 0.6, 1.0, true), WALL_H + 0.04)
 	_build_stairs(d)
 	_build_torches()
 
@@ -296,7 +301,7 @@ func _update_fog() -> void:
 	_last_vis = d.visible.duplicate()
 	_last_explored = d.explored.duplicate()
 	for layer in [[_floors, _floor_tiles, -0.1, Vector3.ONE], [_walls, _wall_tiles, WALL_H / 2, Vector3.ONE],
-			[_low_walls, _low_wall_tiles, LOW_WALL_H / 2, Vector3.ONE]]:
+			[_low_walls, _low_wall_tiles, LOW_WALL_H / 2, Vector3.ONE], [_caps, _wall_tiles, WALL_H + 0.04, Vector3.ONE]]:
 		var mm: MultiMesh = layer[0].multimesh
 		var tiles: Array[Vector2i] = layer[1]
 		for i in tiles.size():
@@ -304,7 +309,8 @@ func _update_fog() -> void:
 			var known := d.is_explored(t.x, t.y)
 			var vis := d.is_visible(t.x, t.y)
 			var shade := 0.88 + 0.12 * float(WorldAnimator.tile_hash(t.x, t.y) % 100) / 100.0
-			var c := Color(shade, shade, shade) if vis else (FOG_MEMORY if known else Color.BLACK)
+			var tone: Color = Color(0.82, 0.86, 0.95) if mm == _floors.multimesh else (Color(0.35, 0.33, 0.36) if mm == _caps.multimesh else Color(1.0, 0.93, 0.86))
+			var c := Color(shade * tone.r, shade * tone.g, shade * tone.b) if vis else (FOG_MEMORY * tone if known else Color.BLACK)
 			mm.set_instance_color(i, c)
 			var scale := Vector3.ONE if known else Vector3.ZERO
 			mm.set_instance_transform(i, Transform3D(Basis.from_scale(scale), Vector3(t.x + 0.5, layer[2], t.y + 0.5)))
@@ -383,7 +389,7 @@ func _sync_actors(dt: float) -> void:
 			var l: OmniLight3D = a["light"]
 			l.visible = not down
 			l.shadow_enabled = c == leader
-			l.light_energy = 1.1 * (1.0 + 0.05 * sin(_time * 9.0 + c.x))
+			l.light_energy = 1.3 * (1.0 + 0.05 * sin(_time * 9.0 + c.x))
 	for c in _actors.keys():
 		if present.has(c):
 			continue
@@ -410,8 +416,8 @@ func _spawn_actor(c: Creature) -> Dictionary:
 		fig = Models.hero(c.race, c.char_class, c.gender)
 		light = OmniLight3D.new()
 		light.light_color = Color(1.0, 0.75, 0.5)
-		light.omni_range = 5.0
-		light.omni_attenuation = 1.2
+		light.omni_range = 6.0
+		light.omni_attenuation = 1.1
 		light.position = Vector3(0, 1.4, 0.3)
 		light.shadow_bias = 0.08
 		fig.add_child(light)
@@ -600,6 +606,22 @@ func _update_markers() -> void:
 		ring.visible = key != ""
 		if key != "":
 			ring.material_override = _ring_mats[key]
+
+
+## A rounded outline used for the move-range squares.
+static func _outline_texture() -> Texture2D:
+	const N := 64
+	var img := Image.create(N, N, false, Image.FORMAT_RGBA8)
+	for y in N:
+		for x in N:
+			var d := minf(minf(x, N - 1 - x), minf(y, N - 1 - y))
+			var a := 0.0
+			if d < 4.0:
+				a = 1.0 - absf(d - 2.0) / 2.5
+			a = maxf(a, 0.18)
+			img.set_pixel(x, y, Color(1, 1, 1, clampf(a, 0.0, 1.0)))
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
 
 
 static func in_range_of(g: Game, h: Hero, m: Monster) -> bool:

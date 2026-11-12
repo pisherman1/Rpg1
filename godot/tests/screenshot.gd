@@ -65,20 +65,23 @@ func _process(_delta: float) -> bool:
 			return false
 		if not _taken.has("_combat_seen"):
 			_taken["_combat_seen"] = _frame
+	# Overlays: open, wait a few frames, capture, then close on a later frame.
 	if _taken.has("3_combat") and not _taken.has("4_sheet"):
-		ui._sheet_hero = g.party[0]
-		if _frame - int(_taken.get("_sheet_open", _frame)) > 3:
+		if not _taken.has("_sheet_open"):
+			_taken["_sheet_open"] = _frame
+			ui._sheet_hero = g.party[0]
+		elif _frame - int(_taken["_sheet_open"]) > 4:
 			_shot("4_sheet")
-			ui._sheet_hero = null
-			return false
-		_taken["_sheet_open"] = _taken.get("_sheet_open", _frame)
+		return false
 	if _taken.has("4_sheet") and not _taken.has("5_levelup"):
-		ui._open_level_up(g.party[2])
-		if _frame - int(_taken.get("_lu_open", _frame)) > 3:
+		if not _taken.has("_lu_open"):
+			ui._sheet_hero = null
+			_taken["_lu_open"] = _frame
+			ui._open_level_up(g.party[2])
+		elif _frame - int(_taken["_lu_open"]) > 4:
 			_shot("5_levelup")
-			ui._level_up_hero = null
-			return false
-		_taken["_lu_open"] = _taken.get("_lu_open", _frame)
+		return false
+	ui._level_up_hero = null
 	if _taken.has("5_levelup") or _frame > 3000:
 		if not _taken.has("6_final"):
 			_shot("6_final")

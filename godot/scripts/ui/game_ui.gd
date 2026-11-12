@@ -351,7 +351,7 @@ func _button(r: Rect2, label: String, action: Callable, enabled: bool = true, ac
 		# Pulsing golden glow around armed/primary buttons.
 		var glow := 0.5 + 0.5 * sin(_now / 260.0)
 		var halo := _style(Color(0, 0, 0, 0), null, 0, radius + 4, 0)
-		var g := halo.duplicate()
+		var g: StyleBoxFlat = halo.duplicate()
 		g.shadow_color = Color(1.0, 0.75, 0.25, 0.25 + 0.25 * glow)
 		g.shadow_size = 10
 		draw_style_box(g, r)
@@ -439,9 +439,12 @@ func _draw_party_screen() -> void:
 		var line := (card_bottom - card_top) / 15.0
 		var y := card_top + line * 0.3
 
-		var sprite_size := minf(card_w * 0.62, line * 3.4)
+		var sprite_size := minf(card_w * 0.7, line * 3.6)
 		# A pedestal glow under a slowly turning 3D model of the hero.
-		draw_circle(Vector2(cx, y + sprite_size * 0.95), sprite_size * 0.32, Color(1.0, 0.75, 0.35, 0.08))
+		draw_set_transform(Vector2(cx, y + sprite_size * 0.93), 0.0, Vector2(1.0, 0.28))
+		for k in 5:
+			draw_circle(Vector2.ZERO, sprite_size * (0.42 - k * 0.07), Color(1.0, 0.72, 0.3, 0.045))
+		draw_set_transform(Vector2.ZERO)
 		var tt := studio.turntable(i, draft.race, draft.char_class, draft.gender) if studio != null else null
 		_portrait(tt, cx - sprite_size / 2, y - line * 0.2, sprite_size, Color.WHITE, false)
 		y += sprite_size + line * 0.9
