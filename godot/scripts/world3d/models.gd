@@ -127,13 +127,15 @@ static func _race_parts(f: ModelFigure, race: String, female: bool, cls: String)
 		"THERIAN":
 			var fox := s(Color(0.9, 0.45, 0.15), 0.8)
 			var white := s(Color(0.96, 0.94, 0.9), 0.8)
-			# Fox mask over the face: a pointed snout with a black nose.
-			f.bone_part("head", Figure.cone(hs.x * 0.2, hs.z * 0.45, 8), fox,
-				Vector3(c.x, c.y - hs.y * 0.08, c.z + hs.z * 0.5), Vector3(90, 0, 0))
-			f.bone_part("head", Figure.sphere(hs.x * 0.06, 8), s(Color(0.05, 0.05, 0.05), 0.3),
-				Vector3(c.x, c.y - hs.y * 0.08, c.z + hs.z * 0.73))
-			f.bone_part("head", Figure.sphere(hs.x * 0.16, 10), white,
-				Vector3(c.x, c.y - hs.y * 0.18, c.z + hs.z * 0.4), Vector3.ZERO, Vector3(1.2, 0.6, 1.0))
+			# Fox mask over the face: a small pointed snout with a black nose and a pale muzzle.
+			# Sized from the face (about half the head box, which also contains hair).
+			var face_z := c.z + hs.z * 0.42
+			f.bone_part("head", Figure.cone(hs.x * 0.085, hs.z * 0.22, 8), fox,
+				Vector3(c.x, c.y - hs.y * 0.1, face_z + hs.z * 0.08), Vector3(90, 0, 0))
+			f.bone_part("head", Figure.sphere(hs.x * 0.028, 8), s(Color(0.05, 0.05, 0.05), 0.3),
+				Vector3(c.x, c.y - hs.y * 0.1, face_z + hs.z * 0.19))
+			f.bone_part("head", Figure.sphere(hs.x * 0.07, 10), white,
+				Vector3(c.x, c.y - hs.y * 0.17, face_z + hs.z * 0.02), Vector3.ZERO, Vector3(1.1, 0.55, 0.8))
 			if not (cls == "WIZARD" or (cls == "FIGHTER" and not female) or (cls == "ROGUE" and not female)):
 				for side in [-1, 1]:
 					f.bone_part("head", Figure.cone(hs.x * 0.14, hs.y * 0.38, 6), fox,
@@ -228,10 +230,10 @@ static func _snout(f: ModelFigure, color: Color) -> void:
 	var hb := f.head_box()
 	var c := hb.get_center()
 	var hs := hb.size
-	f.bone_part("head", Figure.capsule(hs.x * 0.15, hs.z * 0.55), s(color, 0.8),
-		Vector3(c.x, c.y - hs.y * 0.12, c.z + hs.z * 0.55), Vector3(90, 0, 0), Vector3(1.0, 1.0, 0.8))
-	f.bone_part("head", Figure.sphere(hs.x * 0.07, 8), s(Color(0.06, 0.05, 0.05), 0.3),
-		Vector3(c.x, c.y - hs.y * 0.05, c.z + hs.z * 0.82))
+	f.bone_part("head", Figure.capsule(hs.x * 0.1, hs.z * 0.34), s(color, 0.8),
+		Vector3(c.x, c.y - hs.y * 0.12, c.z + hs.z * 0.5), Vector3(90, 0, 0), Vector3(1.0, 1.0, 0.8))
+	f.bone_part("head", Figure.sphere(hs.x * 0.04, 8), s(Color(0.06, 0.05, 0.05), 0.3),
+		Vector3(c.x, c.y - hs.y * 0.08, c.z + hs.z * 0.66))
 
 
 static func _tusks(f: ModelFigure) -> void:

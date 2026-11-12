@@ -93,7 +93,14 @@ func _process(_delta: float) -> bool:
 		if not _taken.has("7_gallery") and _frame - int(_taken["_gallery"]) > 6:
 			_shot("7_gallery")
 			return false
-		if _taken.has("7_gallery"):
+		if _taken.has("7_gallery") and not _taken.has("_faces"):
+			_taken["_faces"] = _frame
+			_show_faces()
+			return false
+		if _taken.has("_faces") and not _taken.has("8_faces") and _frame - int(_taken["_faces"]) > 6:
+			_shot("8_faces")
+			return false
+		if _taken.has("8_faces"):
 			quit(0)
 	return false
 
@@ -124,4 +131,33 @@ func _show_gallery() -> void:
 		r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		r.position = Vector2((i % cols) * w, (i / cols) * 120.0)
 		r.size = Vector2(w, 120)
+		layer.add_child(r)
+
+
+## Close-ups of the faces that carry extra parts (fox masks, snouts, tusks, ears, beards).
+func _show_faces() -> void:
+	var studio: PortraitStudio = _main.ui.studio
+	var layer := CanvasLayer.new()
+	layer.layer = 60
+	root.add_child(layer)
+	var bg := ColorRect.new()
+	bg.color = Color(0.14, 0.12, 0.18)
+	bg.size = Vector2(1600, 720)
+	layer.add_child(bg)
+	var textures: Array = []
+	for cls in Rules.CLASS_ORDER:
+		textures.append(studio.hero_texture("THERIAN", cls, "MALE"))
+		textures.append(studio.hero_texture("THERIAN", cls, "FEMALE"))
+	for t in ["KOBOLD", "GNOLL", "GOBLIN", "ORC", "OGRE"]:
+		textures.append(studio.monster_texture(t))
+	textures.append(studio.hero_texture("ELF", "FIGHTER", "FEMALE"))
+	textures.append(studio.hero_texture("DWARF", "CLERIC", "MALE"))
+	textures.append(studio.hero_texture("DWARF", "WIZARD", "FEMALE"))
+	for i in textures.size():
+		var r := TextureRect.new()
+		r.texture = textures[i]
+		r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		r.position = Vector2((i % 8) * 200.0, (i / 8) * 360.0)
+		r.size = Vector2(200, 350)
 		layer.add_child(r)
