@@ -131,8 +131,34 @@ def roughstone():
     save("rock", rgb, n1 * 0.7 + n2 * 0.3, 4.0)
 
 
+def square_flags():
+    """Square, slightly uneven floor flags with dark joints (4 x 4 per texture)."""
+    cell = N // 4
+    y, x = np.mgrid[0:N, 0:N]
+    ids = (y // cell) * 4 + (x // cell)
+    fy = (y % cell) / cell
+    fx = (x % cell) / cell
+    edge = np.minimum.reduce([fy, 1 - fy, fx, 1 - fx])
+    bevel = np.clip(edge * 10, 0, 1)
+    tone = rng.uniform(0.75, 1.1, 16)[ids]
+    tilt = rng.uniform(-0.12, 0.12, (16, 2))
+    slope = tilt[ids, 0] * (fx - 0.5) + tilt[ids, 1] * (fy - 0.5)
+    n1, n2, n3 = noise(6), noise(24), noise(60)
+    h = bevel * (0.75 + 0.15 * n1) + 0.12 * n2 + slope
+    joint = edge < 0.035
+    gray = (0.5 + 0.28 * n1 - 0.12 * n2) * tone * (0.7 + 0.3 * bevel)
+    gray = np.where(joint, 0.12 + 0.06 * n3, gray)
+    rgb = tint(np.clip(gray, 0, 1), (0.07, 0.075, 0.085), (0.5, 0.52, 0.55))
+    cracks = (np.abs(noise(14) - 0.5) < 0.006) & ~joint & (n2 > 0.55)
+    rgb[cracks] *= 0.7
+    moss = (noise(16) > 0.7) & (edge < 0.06)
+    rgb[moss] = rgb[moss] * 0.6 + np.array([0.05, 0.09, 0.04])
+    save("floor", rgb, h, 5.0)
+
+
 os.makedirs(OUT, exist_ok=True)
 flagstones()
+square_flags()
 bricks()
 planks()
 roughstone()

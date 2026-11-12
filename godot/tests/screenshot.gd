@@ -86,5 +86,42 @@ func _process(_delta: float) -> bool:
 		if not _taken.has("6_final"):
 			_shot("6_final")
 			return false
-		quit(0)
+		if not _taken.has("_gallery"):
+			_taken["_gallery"] = _frame
+			_show_gallery()
+			return false
+		if not _taken.has("7_gallery") and _frame - int(_taken["_gallery"]) > 6:
+			_shot("7_gallery")
+			return false
+		if _taken.has("7_gallery"):
+			quit(0)
 	return false
+
+
+## Every monster and hero variant on one screen, for reviewing the models.
+func _show_gallery() -> void:
+	var studio: PortraitStudio = _main.ui.studio
+	var layer := CanvasLayer.new()
+	layer.layer = 50
+	root.add_child(layer)
+	var bg := ColorRect.new()
+	bg.color = Color(0.1, 0.09, 0.13)
+	bg.size = Vector2(1600, 720)
+	layer.add_child(bg)
+	var textures: Array = []
+	for t in Rules.MONSTERS:
+		textures.append(studio.monster_texture(t))
+	for race in Rules.RACE_ORDER:
+		for cls in Rules.CLASS_ORDER:
+			for g in ["MALE", "FEMALE"]:
+				textures.append(studio.hero_texture(race, cls, g))
+	var cols := 17
+	var w := 1600.0 / cols
+	for i in textures.size():
+		var r := TextureRect.new()
+		r.texture = textures[i]
+		r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		r.position = Vector2((i % cols) * w, (i / cols) * 120.0)
+		r.size = Vector2(w, 120)
+		layer.add_child(r)

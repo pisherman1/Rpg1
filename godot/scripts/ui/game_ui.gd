@@ -339,9 +339,6 @@ func _box(r: Rect2, color: Color, border = null, border_width: float = 3.0) -> v
 	var radius := clampf(minf(r.size.x, r.size.y) * 0.12, 3.0, 12.0)
 	var big := r.size.x > size.x * 0.5 and r.size.y > size.y * 0.5
 	draw_style_box(_style(color, border, border_width, radius, 10.0 if (border != null and big) else 0.0), r)
-	# A faint sheen along the top edge gives panels some depth.
-	if r.size.y > 18 and color.a > 0.5:
-		draw_rect(Rect2(r.position.x + radius, r.position.y + border_width + 1, r.size.x - radius * 2, maxf(1.0, r.size.y * 0.04)), Color(1, 1, 1, 0.05))
 
 
 func _button(r: Rect2, label: String, action: Callable, enabled: bool = true, active: bool = false) -> void:
@@ -357,8 +354,12 @@ func _button(r: Rect2, label: String, action: Callable, enabled: bool = true, ac
 		draw_style_box(g, r)
 	var border: Color = C_GOLD if active else (C_BORDER if enabled else Color("2c2438"))
 	draw_style_box(_style(bg, border, 2.0, radius, 3.0 if enabled else 0.0, true), r)
-	# Top highlight and a lower shade make the button read as raised.
-	draw_rect(Rect2(r.position.x + radius, r.position.y + 3, r.size.x - radius * 2, r.size.y * 0.32), Color(1, 1, 1, 0.07 if enabled else 0.02))
+	# A soft gradient highlight makes the button read as raised.
+	var hl := Rect2(r.position.x + radius * 0.6, r.position.y + 2.5, r.size.x - radius * 1.2, r.size.y * 0.5)
+	var top := Color(1, 1, 1, 0.13 if enabled else 0.03)
+	var bottom := Color(1, 1, 1, 0.0)
+	draw_polygon(PackedVector2Array([hl.position, Vector2(hl.end.x, hl.position.y), hl.end, Vector2(hl.position.x, hl.end.y)]),
+		PackedColorArray([top, top, bottom, bottom]))
 	var pressed := r == _press_rect and _now - _press_time < 220
 	if pressed:
 		var k := 1.0 - (_now - _press_time) / 220.0

@@ -64,7 +64,7 @@ static func hero(race: String, cls: String, gender: String) -> Figure:
 		"FIGHTER":
 			body_mat = metal(STEEL)
 			legs = Color(0.25, 0.22, 0.2)
-			trim = Color(0.65, 0.12, 0.1)
+			trim = Color(0.5, 0.08, 0.08)
 		"ROGUE":
 			body = DARK_LEATHER
 			body_mat = s(body)
@@ -154,7 +154,8 @@ static func _class_gear(f: Figure, cls: String, female: bool, body: Color, trim:
 			f.part(f.head, Figure.box(Vector3(0.02, 0.07, 0.03)), metal(STEEL), Vector3(0, 0.1, 0.11))  # nasal guard
 			if female:
 				f.part(f.head, Figure.capsule(0.05, 0.2), s(HAIR_FOR_HELM, 0.9), Vector3(0, 0.05, -0.1), Vector3(20, 0, 0))
-			f.part(f.torso, Figure.box(Vector3(0.22, 0.26, 0.02)), s(trim), Vector3(0, 0.17, 0.11))  # tabard
+			f.part(f.torso, Figure.box(Vector3(0.14, 0.24, 0.015)), s(trim, 0.95), Vector3(0, 0.14, 0.108))  # tabard
+			f.part(f.torso, Figure.box(Vector3(0.05, 0.05, 0.01)), metal(GOLD), Vector3(0, 0.2, 0.118))
 			_sword(f.arm_r, f, 0.5)
 			_shield(f.arm_l, f, Color(0.18, 0.28, 0.6), GOLD, false)
 		"ROGUE":
