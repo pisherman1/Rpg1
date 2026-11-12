@@ -13,7 +13,7 @@ var _turntables := {}  # slot -> {"vp", "fig", "key", "angle"}
 func hero_texture(race: String, cls: String, gender: String) -> Texture2D:
 	var key := "h:%s:%s:%s" % [race, cls, gender]
 	if not _stills.has(key):
-		_stills[key] = _make_still(Models.hero(race, cls, gender), 1.0)
+		_stills[key] = _make_still(Models.hero(race, cls, gender), 1.2)
 	return _stills[key].get_texture()
 
 
@@ -21,7 +21,7 @@ func monster_texture(type: String) -> Texture2D:
 	var key := "m:" + type
 	if not _stills.has(key):
 		var fig := Models.monster(type)
-		_stills[key] = _make_still(fig, maxf(0.6, fig.rig.scale.y))
+		_stills[key] = _make_still(fig, maxf(0.6, fig.model_height()))
 	return _stills[key].get_texture()
 
 
@@ -36,7 +36,7 @@ func turntable(slot: int, race: String, cls: String, gender: String) -> Texture2
 	var key := "%s:%s:%s" % [race, cls, gender]
 	var t = _turntables.get(slot)
 	if t == null:
-		var vp := _make_viewport(TURNTABLE_SIZE, 1.0)
+		var vp := _make_viewport(TURNTABLE_SIZE, 1.2)
 		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		t = {"vp": vp, "fig": null, "key": "", "angle": 0.5 + slot * 0.8}
 		_turntables[slot] = t

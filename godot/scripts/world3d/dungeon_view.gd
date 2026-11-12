@@ -493,8 +493,8 @@ func _sync_actors(dt: float) -> void:
 		dying["t"] += dt
 		var fig: Figure = dying["fig"]
 		fig.animate(dt, false, Vector3.ZERO, 0.0, true)
-		fig.set_fade(clampf(1.0 - (dying["t"] - 0.4) / 0.6, 0.0, 1.0))
-		if dying["t"] > 1.0:
+		fig.set_fade(clampf(1.0 - (dying["t"] - 1.2) / 0.6, 0.0, 1.0))
+		if dying["t"] > 1.8:
 			fig.queue_free()
 		else:
 			still.append(dying)
@@ -513,10 +513,13 @@ func _spawn_actor(c: Creature) -> Dictionary:
 		light.position = Vector3(0, 1.4, 0.3)
 		light.shadow_bias = 0.08
 		fig.add_child(light)
+	elif c.ally:
+		fig = Models.minion()
+		fig.set_tint(Color(0.3, 1.0, 0.5, 0.12))
+		if fig is ModelFigure:
+			fig.play_spawn()
 	else:
 		fig = Models.monster(c.type)
-		if c.ally:
-			fig.set_tint(Color(0.3, 1.0, 0.5, 0.18))
 	var ring := MeshInstance3D.new()
 	var torus := TorusMesh.new()
 	torus.inner_radius = 0.36
@@ -582,6 +585,18 @@ func _sync_props(dt: float) -> void:
 
 func _update_projectiles() -> void:
 	var live := animator._projectiles.filter(func(p): return p["t"] >= 0.0)
+	# Whoever a new spell or arrow leaves from plays their casting or shooting animation.
+	for p in live:
+		if p.has("cast_seen"):
+			continue
+		p["cast_seen"] = true
+		var from := Vector2i(int(p["fx"] / PX), int(p["fy"] / PX))
+		var who: Creature = game.hero_at(from.x, from.y)
+		if who == null:
+			who = game.monster_at(from.x, from.y)
+		if who != null and _actors.has(who):
+			_actors[who]["fig"].cast(p["kind"] == "ARROW")
+
 	while _proj_pool.size() < live.size():
 		var n := Node3D.new()
 		var orb := MeshInstance3D.new()

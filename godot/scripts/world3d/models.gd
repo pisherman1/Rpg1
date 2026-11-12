@@ -37,10 +37,225 @@ static func glow(c: Color, energy: float = 2.5) -> StandardMaterial3D:
 
 
 # =================================================================================
-# Heroes
+# Rigged models (KayKit, CC0)
 # =================================================================================
 
+## Height (metres) and width multiplier per race; a human is about 1.15 m so heads read well from above.
+const RACE_SIZE := {
+	"HUMAN": [1.15, 1.0], "DWARF": [0.95, 1.18], "ELF": [1.2, 0.93], "HALFLING": [0.85, 0.95], "THERIAN": [1.08, 0.95],
+}
+const ONE_HAND := ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Slice_Horizontal"]
+const STAB := ["1H_Melee_Attack_Stab", "1H_Melee_Attack_Slice_Diagonal", "Dualwield_Melee_Attack_Stab"]
+const TWO_HAND := ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice"]
+const UNARMED := ["Unarmed_Melee_Attack_Punch_A", "Unarmed_Melee_Attack_Punch_B"]
+const KNIGHT_GEAR := ["1H_Sword_Offhand", "Badge_Shield", "Rectangle_Shield", "Round_Shield", "Spike_Shield", "1H_Sword", "2H_Sword"]
+const BARBARIAN_GEAR := ["1H_Axe_Offhand", "Barbarian_Round_Shield", "1H_Axe", "2H_Axe", "Mug"]
+const ROGUE_GEAR := ["Knife_Offhand", "1H_Crossbow", "2H_Crossbow", "Knife", "Throwable"]
+const MAGE_GEAR := ["Spellbook", "Spellbook_open", "1H_Wand", "2H_Staff"]
+
+
+static func _except(all: Array, keep: Array) -> Array:
+	return all.filter(func(n): return not keep.has(n))
+
+
 static func hero(race: String, cls: String, gender: String) -> Figure:
+	if not ResourceLoader.exists(ModelFigure.DIR + "Knight.glb"):
+		return hero_procedural(race, cls, gender)
+	var female := gender == "FEMALE"
+	var size: Array = RACE_SIZE[race]
+	var h: float = size[0]
+	var w: float = size[1]
+	var dwarf_man := race == "DWARF" and not female
+	var f: ModelFigure
+	var head := ""
+	match cls:
+		"FIGHTER":
+			# Knight: sword and shield; women fight bare-headed so you can tell them apart.
+			f = ModelFigure.new("Knight.glb", h, w, _except(KNIGHT_GEAR, ["1H_Sword", "Round_Shield"]) + (["Knight_Helmet"] if female else []))
+			head = "Knight_Head"
+			f.attack_anims = ONE_HAND
+			if female:
+				f.swap_head("Rogue.glb", "Rogue_Head", ["Knight_Head"])
+				head = "Rogue_Head"
+		"ROGUE":
+			f = ModelFigure.new("Rogue.glb" if female else "Rogue_Hooded.glb", h, w, _except(ROGUE_GEAR, ["Knife"]))
+			head = "Rogue_Head" if female else "Rogue_Head_Hooded"
+			f.attack_anims = STAB
+		"WIZARD":
+			f = ModelFigure.new("Mage.glb", h, w, _except(MAGE_GEAR, ["2H_Staff"]))
+			head = "Mage_Head"
+			f.attack_anims = ["2H_Melee_Attack_Stab", "1H_Melee_Attack_Chop"]
+			f.cast_anim = "Spellcast_Shoot"
+			if female:
+				f.swap_head("Rogue.glb", "Rogue_Head", ["Mage_Head"])
+				head = "Rogue_Head"
+		_:
+			# Cleric: a white-and-gold armoured priest with a shield and a holy sceptre.
+			f = ModelFigure.new("Knight.glb", h, w, _except(KNIGHT_GEAR, ["Round_Shield"]) + ["Knight_Helmet"])
+			f.tint(Color(1.0, 0.95, 0.78), ["Knight_Body", "Knight_ArmLeft", "Knight_ArmRight", "Knight_LegLeft", "Knight_LegRight", "Knight_Cape", "Round_Shield"])
+			var sceptre := f.borrow("Mage.glb", "1H_Wand")
+			if sceptre != null:
+				f.tint(Color(1.0, 0.85, 0.45), ["1H_Wand"])
+			f.attack_anims = ONE_HAND
+			f.cast_anim = "Spellcast_Raise"
+			f.swap_head("Rogue.glb" if female else "Mage.glb", "Rogue_Head" if female else "Mage_Head", ["Knight_Head"])
+			head = "Rogue_Head" if female else "Mage_Head"
+	if dwarf_man:
+		f.swap_head("Barbarian.glb", "Barbarian_Head", [head])
+	_race_parts(f, race, female, cls)
+	return f
+
+
+static func _race_parts(f: ModelFigure, race: String, female: bool, cls: String) -> void:
+	var hb := f.head_box()
+	var c := hb.get_center()
+	var hs := hb.size
+	match race:
+		"ELF":
+			var skin := s(SKIN["ELF"], 0.7)
+			for side in [-1, 1]:
+				f.bone_part("head", Figure.cone(hs.x * 0.09, hs.y * 0.42, 6), skin,
+					Vector3(c.x + side * hs.x * 0.5, c.y + hs.y * 0.05, c.z - hs.z * 0.05), Vector3(0, 0, -side * 70))
+		"DWARF":
+			if female:
+				var hair := s(HAIR["DWARF"], 0.9)
+				for side in [-1, 1]:
+					f.bone_part("head", Figure.capsule(hs.x * 0.09, hs.y * 0.75), hair,
+						Vector3(c.x + side * hs.x * 0.42, c.y - hs.y * 0.45, c.z + hs.z * 0.05))
+					f.bone_part("head", Figure.sphere(hs.x * 0.08, 8), metal(GOLD),
+						Vector3(c.x + side * hs.x * 0.42, c.y - hs.y * 0.85, c.z + hs.z * 0.05))
+		"THERIAN":
+			var fox := s(Color(0.9, 0.45, 0.15), 0.8)
+			var white := s(Color(0.96, 0.94, 0.9), 0.8)
+			# Fox mask over the face: a pointed snout with a black nose.
+			f.bone_part("head", Figure.cone(hs.x * 0.2, hs.z * 0.45, 8), fox,
+				Vector3(c.x, c.y - hs.y * 0.08, c.z + hs.z * 0.5), Vector3(90, 0, 0))
+			f.bone_part("head", Figure.sphere(hs.x * 0.06, 8), s(Color(0.05, 0.05, 0.05), 0.3),
+				Vector3(c.x, c.y - hs.y * 0.08, c.z + hs.z * 0.73))
+			f.bone_part("head", Figure.box(Vector3(hs.x * 0.7, hs.y * 0.12, hs.z * 0.05)), white,
+				Vector3(c.x, c.y - hs.y * 0.22, c.z + hs.z * 0.47))
+			if not (cls == "WIZARD" or (cls == "FIGHTER" and not female) or (cls == "ROGUE" and not female)):
+				for side in [-1, 1]:
+					f.bone_part("head", Figure.cone(hs.x * 0.14, hs.y * 0.38, 6), fox,
+						Vector3(c.x + side * hs.x * 0.3, c.y + hs.y * 0.58, c.z), Vector3(0, 0, -side * 15))
+			# Bushy tail from the hips.
+			var hips := f.skel.get_bone_global_rest(f.skel.find_bone("hips")).origin
+			var tail := f.bone_part("hips", Figure.capsule(hs.x * 0.14, hs.y * 0.9), s(Color(0.9, 0.45, 0.15), 0.95),
+				hips + Vector3(0, -hs.y * 0.05, -hs.z * 0.55), Vector3(-55, 0, 0))
+			f.bone_part("hips", Figure.sphere(hs.x * 0.13, 8), white, hips + Vector3(0, hs.y * 0.3, -hs.z * 0.95))
+			if tail != null:
+				f.tail = tail
+
+
+static func monster(type: String) -> Figure:
+	if type == "GIANT_RAT" or not ResourceLoader.exists(ModelFigure.DIR + "Knight.glb"):
+		return monster_procedural(type)
+	var f: ModelFigure
+	match type:
+		"SKELETON":
+			f = ModelFigure.new("Skeleton_Warrior.glb", 1.15)
+			f.attach_model("Skeleton_Blade.gltf", "handslot.r")
+			f.attach_model("Skeleton_Shield_Small_A.gltf", "handslot.l")
+			f.attack_anims = ONE_HAND
+		"ZOMBIE":
+			f = ModelFigure.new("Knight.glb", 1.15, 1.05, KNIGHT_GEAR + ["Knight_Helmet"])
+			f.tint(Color(0.55, 0.72, 0.5))
+			f.walk_anim = "Walking_C"
+			f.attack_anims = UNARMED
+		"GHOUL":
+			f = ModelFigure.new("Skeleton_Rogue.glb", 1.12, 1.05)
+			f.tint(Color(0.85, 0.72, 1.0))
+			f.attack_anims = UNARMED
+		"GOBLIN":
+			f = ModelFigure.new("Rogue_Hooded.glb", 0.82, 0.95, _except(ROGUE_GEAR, ["Knife"]))
+			f.tint(Color(0.55, 0.9, 0.45))
+			f.attack_anims = STAB
+			_ears(f, Color(0.45, 0.72, 0.35), 0.7)
+		"KOBOLD":
+			f = ModelFigure.new("Rogue_Hooded.glb", 0.75, 0.9, _except(ROGUE_GEAR, ["Knife"]))
+			f.tint(Color(0.95, 0.55, 0.35))
+			f.attack_anims = STAB
+			_snout(f, Color(0.85, 0.42, 0.22))
+			_monster_tail(f, Color(0.85, 0.42, 0.22))
+		"ORC":
+			f = ModelFigure.new("Barbarian.glb", 1.3, 1.15, _except(BARBARIAN_GEAR, ["1H_Axe", "Barbarian_Round_Shield"]) + ["Barbarian_Hat"])
+			f.tint(Color(0.55, 0.78, 0.48))
+			f.attack_anims = ONE_HAND
+			_tusks(f)
+		"GNOLL":
+			f = ModelFigure.new("Barbarian.glb", 1.3, 0.95, _except(BARBARIAN_GEAR, ["2H_Axe"]))
+			f.tint(Color(1.0, 0.82, 0.55))
+			f.idle_anim = "2H_Melee_Idle"
+			f.attack_anims = TWO_HAND
+			_snout(f, Color(0.75, 0.6, 0.38))
+		"BUGBEAR":
+			f = ModelFigure.new("Barbarian.glb", 1.45, 1.2, _except(BARBARIAN_GEAR, ["1H_Axe"]))
+			f.tint(Color(0.78, 0.58, 0.42))
+			f.attack_anims = ONE_HAND
+		"OGRE":
+			f = ModelFigure.new("Barbarian.glb", 1.95, 1.4, _except(BARBARIAN_GEAR, ["2H_Axe"]) + ["Barbarian_Hat"])
+			f.tint(Color(1.0, 0.86, 0.68))
+			f.idle_anim = "2H_Melee_Idle"
+			f.attack_anims = TWO_HAND
+			f.walk_anim = "Walking_B"
+			_tusks(f)
+		_:
+			return monster_procedural(type)
+	return f
+
+
+## The party's raised skeletons: a ragged minion that claws its way up out of the floor.
+static func minion() -> Figure:
+	if not ResourceLoader.exists(ModelFigure.DIR + "Skeleton_Minion.glb"):
+		return monster_procedural("SKELETON")
+	var f := ModelFigure.new("Skeleton_Minion.glb", 1.05)
+	f.attach_model("Skeleton_Blade.gltf", "handslot.r")
+	f.attack_anims = ONE_HAND
+	f.spawn_anim = "Skeletons_Awaken_Floor"
+	return f
+
+
+static func _ears(f: ModelFigure, color: Color, size: float) -> void:
+	var hb := f.head_box()
+	var c := hb.get_center()
+	var hs := hb.size
+	for side in [-1, 1]:
+		f.bone_part("head", Figure.cone(hs.x * 0.12 * size, hs.y * 0.9 * size, 6), s(color, 0.8),
+			Vector3(c.x + side * hs.x * 0.52, c.y + hs.y * 0.05, c.z), Vector3(0, 0, -side * 80))
+
+
+static func _snout(f: ModelFigure, color: Color) -> void:
+	var hb := f.head_box()
+	var c := hb.get_center()
+	var hs := hb.size
+	f.bone_part("head", Figure.box(Vector3(hs.x * 0.4, hs.y * 0.28, hs.z * 0.45)), s(color, 0.8),
+		Vector3(c.x, c.y - hs.y * 0.12, c.z + hs.z * 0.58))
+	f.bone_part("head", Figure.sphere(hs.x * 0.07, 8), s(Color(0.06, 0.05, 0.05), 0.3),
+		Vector3(c.x, c.y - hs.y * 0.05, c.z + hs.z * 0.82))
+
+
+static func _tusks(f: ModelFigure) -> void:
+	var hb := f.head_box()
+	var c := hb.get_center()
+	var hs := hb.size
+	for side in [-1, 1]:
+		f.bone_part("head", Figure.cone(hs.x * 0.05, hs.y * 0.2, 6), s(Color(0.96, 0.92, 0.8), 0.5),
+			Vector3(c.x + side * hs.x * 0.16, c.y - hs.y * 0.22, c.z + hs.z * 0.5))
+
+
+static func _monster_tail(f: ModelFigure, color: Color) -> void:
+	var hb := f.head_box()
+	var hs := hb.size
+	var hips := f.skel.get_bone_global_rest(f.skel.find_bone("hips")).origin
+	f.tail = f.bone_part("hips", Figure.cylinder(hs.x * 0.04, hs.x * 0.14, hs.y * 1.2, 8), s(color, 0.8),
+		hips + Vector3(0, -hs.y * 0.2, -hs.z * 0.7), Vector3(-70, 0, 0))
+
+
+# =================================================================================
+# Heroes (procedural fallback)
+# =================================================================================
+
+static func hero_procedural(race: String, cls: String, gender: String) -> Figure:
 	var f := Figure.new()
 	var b: Array = BUILD[race]
 	var hgt: float = b[0]
@@ -239,7 +454,7 @@ static func _shield(arm: Node3D, f: Figure, face: Color, rim: Color, round_shiel
 # Monsters
 # =================================================================================
 
-static func monster(type: String) -> Figure:
+static func monster_procedural(type: String) -> Figure:
 	match type:
 		"GIANT_RAT": return _rat()
 		"KOBOLD": return _humanoid(0.62, 0.72, Color(0.78, 0.42, 0.2), Color(0.45, 0.25, 0.15), "spear", "kobold")

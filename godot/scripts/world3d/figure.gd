@@ -117,6 +117,16 @@ func set_tint(c: Color) -> void:
 	_base_overlay = c
 
 
+## Plays a casting or shooting gesture (models override this with real animations).
+func cast(_ranged_weapon: bool) -> void:
+	pass
+
+
+## Height of the figure in metres.
+func model_height() -> float:
+	return rig.scale.y
+
+
 ## Fades the whole figure (death). 1 = solid.
 func set_fade(alpha: float) -> void:
 	for mi in _meshes:

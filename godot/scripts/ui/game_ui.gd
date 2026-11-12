@@ -560,7 +560,7 @@ func _draw_map_markers(g: Game) -> void:
 		var pos := world.animator.display_pos(c)
 		if world.is_behind(pos):
 			continue
-		var tall := 1.25
+		var tall := 1.4
 		if c is Monster:
 			tall = 1.15 * _monster_height(c.type)
 		var top := world.to_screen(pos, tall)
@@ -585,13 +585,13 @@ func _draw_map_markers(g: Game) -> void:
 static func _monster_height(type: String) -> float:
 	match type:
 		"GIANT_RAT": return 0.45
-		"KOBOLD": return 0.7
-		"GOBLIN": return 0.78
-		"ORC": return 1.2
-		"GNOLL": return 1.25
-		"BUGBEAR": return 1.4
-		"OGRE": return 1.85
-	return 1.08
+		"KOBOLD": return 0.8
+		"GOBLIN": return 0.88
+		"ORC": return 1.32
+		"GNOLL": return 1.32
+		"BUGBEAR": return 1.45
+		"OGRE": return 1.95
+	return 1.15
 
 
 ## Damage numbers and other combat text, rising and fading above the world.
