@@ -59,10 +59,12 @@ func _process(_delta: float) -> bool:
 			if not g.is_busy() and g.phase != Game.Phase.GAME_OVER and _frame % 2 == 0:
 				_bot.decide(g)
 			g.tick()
-		if _frame % 100 == 0:
+		if _frame % 100 == 0 and _frame != 500:
 			ui._open_menu()
 		elif _frame % 100 == 10:
 			ui.handle_back()
+		if _frame == 505:
+			_check_gestures(ui)
 	if _frame >= UI_FRAMES:
 		var window: Vector2 = _main.get_viewport().get_visible_rect().size
 		if ui.size != window:
@@ -78,6 +80,61 @@ func _process(_delta: float) -> bool:
 			printerr(f)
 		quit(1 if failures.size() > 0 else 0)
 	return false
+
+
+## Feeds touch events through the UI: a drag pans, a squeeze zooms in, a spread zooms out,
+## and a short tap is still a tap (not a pan).
+func _check_gestures(ui: GameUI) -> void:
+	var world: DungeonView = ui.world
+	ui._menu_open = false
+	ui._sheet_hero = null
+	ui._level_up_hero = null
+	ui._inventory_open = false
+	var p := Vector2(ui.map_w * 0.4, ui.size.y * 0.5)
+	ui._input(_touch(0, p, true))
+	ui._input(_drag(0, p + Vector2(60, 0), Vector2(60, 0)))
+	ui._input(_drag(0, p + Vector2(120, 0), Vector2(60, 0)))
+	ui._input(_touch(0, p + Vector2(120, 0), false))
+	if world.pan_offset.length() < 0.01:
+		fail("dragging did not pan the camera")
+	var before := world.zoom
+	ui._input(_touch(0, p - Vector2(100, 0), true))
+	ui._input(_touch(1, p + Vector2(100, 0), true))
+	ui._input(_drag(1, p + Vector2(40, 0), Vector2(-60, 0)))
+	ui._input(_touch(1, p + Vector2(40, 0), false))
+	ui._input(_touch(0, p - Vector2(100, 0), false))
+	if not world.zoom < before:
+		fail("squeezing did not zoom in (%s -> %s)" % [before, world.zoom])
+	before = world.zoom
+	ui._input(_touch(0, p - Vector2(40, 0), true))
+	ui._input(_touch(1, p + Vector2(40, 0), true))
+	ui._input(_drag(1, p + Vector2(140, 0), Vector2(100, 0)))
+	ui._input(_touch(1, p + Vector2(140, 0), false))
+	ui._input(_touch(0, p - Vector2(40, 0), false))
+	if not world.zoom > before:
+		fail("spreading did not zoom out (%s -> %s)" % [before, world.zoom])
+	var pan := world.pan_offset
+	ui._input(_touch(0, p, true))
+	ui._input(_touch(0, p + Vector2(2, 1), false))
+	if world.pan_offset != pan:
+		fail("a tap moved the camera")
+	print("gestures: zoom %.2f, pan %s" % [world.zoom, world.pan_offset])
+
+
+static func _touch(index: int, pos: Vector2, pressed: bool) -> InputEventScreenTouch:
+	var e := InputEventScreenTouch.new()
+	e.index = index
+	e.position = pos
+	e.pressed = pressed
+	return e
+
+
+static func _drag(index: int, pos: Vector2, rel: Vector2) -> InputEventScreenDrag:
+	var e := InputEventScreenDrag.new()
+	e.index = index
+	e.position = pos
+	e.relative = rel
+	return e
 
 
 func fail(message: String) -> void:

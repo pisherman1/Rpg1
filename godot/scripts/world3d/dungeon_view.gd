@@ -11,11 +11,21 @@ const CAM_DIST := 7.6
 const CAM_PITCH := 50.0
 const FOG_MEMORY := Color(0.24, 0.27, 0.4)
 const MAX_SHADOW_TORCHES := 4
+const ZOOM_MIN := 0.5
+const ZOOM_MAX := 1.9
+## false: squeezing fingers together zooms in and spreading zooms out (as requested);
+## true: the usual phone-map behaviour (spreading zooms in).
+const PINCH_SPREAD_ZOOMS_IN := false
 
 var animator := WorldAnimator.new()
 var game: Game = null
 ## Fraction of the screen width covered by the map (the rest is the side panel).
 var map_fraction := 0.66
+## Player camera controls: distance multiplier and an offset from the followed character.
+var zoom := 1.0
+var pan_offset := Vector3.ZERO
+var _follow_key = null
+var _recentring := false
 
 var camera: Camera3D
 var _env: WorldEnvironment
@@ -205,18 +215,52 @@ func step(fx: Array, dt: float) -> void:
 	_update_markers()
 
 
+## Moves the camera by a screen-space drag (the world follows the finger).
+func pan_screen(delta: Vector2) -> void:
+	if game == null:
+		return
+	var ppm := px_per_metre(Vector2(animator.cam_x - 8.0, animator.cam_y - 8.0))
+	if ppm <= 0.01:
+		return
+	pan_offset -= Vector3(delta.x, 0, delta.y) / ppm
+	# Don't let the view wander off the map.
+	var d := game.dungeon
+	var focus := Vector3(animator.cam_x / PX, 0, animator.cam_y / PX) + pan_offset
+	focus.x = clampf(focus.x, 0.0, d.width)
+	focus.z = clampf(focus.z, 0.0, d.height)
+	pan_offset = focus - Vector3(animator.cam_x / PX, 0, animator.cam_y / PX)
+
+
+## Multiplies the camera distance (below 1 is closer).
+func zoom_by(factor: float) -> void:
+	zoom = clampf(zoom * factor, ZOOM_MIN, ZOOM_MAX)
+
+
 func _update_camera(vp: Vector2) -> void:
-	var focus := Vector3(animator.cam_x / PX, 0.0, animator.cam_y / PX)
+	# Snap back to the action when the turn passes or the party sets off walking.
+	var key = game.current() if game.in_combat() else game.leader()
+	if key != _follow_key:
+		_follow_key = key
+		_recentring = true
+	if game.phase == Game.Phase.EXPLORING and not game._walk_path.is_empty():
+		_recentring = true
+	if _recentring:
+		pan_offset = pan_offset.lerp(Vector3.ZERO, 0.12)
+		if pan_offset.length() < 0.02:
+			pan_offset = Vector3.ZERO
+			_recentring = false
+	var focus := Vector3(animator.cam_x / PX, 0.0, animator.cam_y / PX) + pan_offset
 	var shake := Vector3(animator._shake_x, 0, animator._shake_y) / PX
 	var pitch := deg_to_rad(CAM_PITCH)
-	var back := Vector3(0, sin(pitch), cos(pitch)) * CAM_DIST
+	var dist := CAM_DIST * zoom
+	var back := Vector3(0, sin(pitch), cos(pitch)) * dist
 	camera.position = focus + back + shake
 	if _dust != null:
 		_dust.position = focus + Vector3(0, 0.9, 0)
 	camera.look_at(focus + shake, Vector3.UP)
 	# Centre the focus in the map area rather than the whole screen.
 	var aspect := vp.x / maxf(1.0, vp.y)
-	var half_w := tan(deg_to_rad(camera.fov / 2)) * aspect * CAM_DIST
+	var half_w := tan(deg_to_rad(camera.fov / 2)) * aspect * dist
 	camera.h_offset = half_w * (1.0 - map_fraction)
 
 

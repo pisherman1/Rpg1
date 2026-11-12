@@ -43,7 +43,6 @@ var screen := Screen.PARTY
 
 # --- Layout & input -------------------------------------------------------------
 var _hits: Array = []  # [Rect2, Callable, click]
-var _down := Vector2.ZERO
 var map_w := 0
 var tile_px := 64
 
@@ -226,15 +225,69 @@ func _ask_name(current: String, callback: Callable) -> void:
 # Input
 # =================================================================================
 
-func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+## Touches currently down: index -> position, and where each began.
+var _touches := {}
+var _touch_start := {}
+## Set once a gesture has panned or pinched, so lifting the finger isn't also a tap.
+var _gestured := false
+var _pinch_dist := 0.0
+
+
+## All pointer input arrives as touches (the mouse is turned into touches on desktop), so taps,
+## drags and pinches share one path. The mouse wheel also zooms.
+func _input(event: InputEvent) -> void:
+	if _name_dialog.visible:
+		return
+	if event is InputEventScreenTouch:
 		if event.pressed:
-			_down = event.position
+			_touches[event.index] = event.position
+			_touch_start[event.index] = event.position
+			if _touches.size() == 1:
+				_gestured = false
+			elif _touches.size() == 2:
+				_pinch_dist = _two_finger_distance()
+				_gestured = true
 		else:
-			if absf(event.position.x - _down.x) > tile_px or absf(event.position.y - _down.y) > tile_px:
-				return
-			_handle_tap(event.position)
-		accept_event()
+			var start: Vector2 = _touch_start.get(event.index, event.position)
+			var single := _touches.size() == 1
+			_touches.erase(event.index)
+			_touch_start.erase(event.index)
+			if single and not _gestured and start.distance_to(event.position) <= tile_px * 0.6:
+				_handle_tap(event.position)
+			if _touches.is_empty():
+				_gestured = false
+		get_viewport().set_input_as_handled()
+	elif event is InputEventScreenDrag:
+		_touches[event.index] = event.position
+		if _touches.size() >= 2:
+			var d := _two_finger_distance()
+			if _pinch_dist > 1.0 and d > 1.0 and _can_move_camera(_touch_start.values()[0]):
+				# Squeeze (fingers together) zooms in, spreading them zooms out.
+				var ratio := d / _pinch_dist
+				world.zoom_by(ratio if not DungeonView.PINCH_SPREAD_ZOOMS_IN else 1.0 / ratio)
+			_pinch_dist = d
+			_gestured = true
+		elif _touches.size() == 1:
+			var start: Vector2 = _touch_start.get(event.index, event.position)
+			if _can_move_camera(start) and (_gestured or start.distance_to(event.position) > tile_px * 0.6):
+				_gestured = true
+				world.pan_screen(event.relative)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		if _can_move_camera(event.position):
+			world.zoom_by(0.9 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.1)
+			get_viewport().set_input_as_handled()
+
+
+func _two_finger_distance() -> float:
+	var pts: Array = _touches.values()
+	return pts[0].distance_to(pts[1]) if pts.size() >= 2 else 0.0
+
+
+## The camera can be moved by gestures that start on the map while no overlay is open.
+func _can_move_camera(at: Vector2) -> bool:
+	return screen == Screen.PLAY and Session.game != null and at.x < map_w and not _menu_open \
+		and _sheet_hero == null and _level_up_hero == null and not _inventory_open
 
 
 func _handle_tap(p: Vector2) -> void:
